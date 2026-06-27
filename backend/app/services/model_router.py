@@ -11,6 +11,7 @@ JSON_SECONDARY_FALLBACK_MODEL = EASY_MODEL
 JSON_FALLBACK_MODEL = "openrouter/free"
 LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
 LOCAL_HEURISTIC_PARSER_MODEL = "local:heuristic-parser"
+LOCAL_LLAMA_TRIVIA_MODEL = "local:llama-trivia"
 VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
 
 

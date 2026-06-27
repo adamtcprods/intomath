@@ -65,10 +65,10 @@ OPENROUTER_SITE_URL=http://localhost:3000
 DATABASE_URL=sqlite:///./intomath.db
 CORS_ORIGINS=http://localhost:3000
 LOCAL_SOLVER_FIRST=true
-LOCAL_SOLVER_OLLAMA_DETECTION_ENABLED=true
-LOCAL_SOLVER_OLLAMA_BASE_URL=http://localhost:11434
-LOCAL_SOLVER_OLLAMA_MODEL=hf.co/unsloth/gemma-3-270m-it-qat-GGUF:Q4_K_XL
-LOCAL_SOLVER_OLLAMA_TIMEOUT_SECONDS=4.0
+LOCAL_SOLVER_LLAMA_DETECTION_ENABLED=true
+LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
+LOCAL_SOLVER_LLAMA_MODEL=hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL
+LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=4.0
 ```
 
 ### PostgreSQL option
@@ -88,10 +88,10 @@ IntoMath expects the following model policy:
 - hard solving via OpenRouter: `nvidia/nemotron-3-super-120b-a12b:free`
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
-For stronger local-first routing, run a tiny Ollama detector locally:
+For stronger local-first routing, run a tiny Llama-server detector locally:
 
 ```bash
-ollama run hf.co/unsloth/gemma-3-270m-it-qat-GGUF:Q4_K_XL
+./llama-server -m hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL --chat-template-kwargs '{"enable_thinking":true}'
 ```
 
 The detector only decides whether a prompt can be normalized into a deterministic-solver shape; the deterministic solver still produces the answer and rejects unsupported hints.

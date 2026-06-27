@@ -15,7 +15,8 @@ dependencies = [
   "pillow>=11.0.0",
   "torch>=2.5.0",
   "transformers>=4.47.0",
-  "pytest>=8.4.1"
+  "pytest>=8.4.1",
+  "openai>=2.0.0"
 ]
 
 [tool.pytest.ini_options]

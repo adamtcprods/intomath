@@ -21,6 +21,8 @@ class LinearEquation:
     net_a: float
     net_c: float
     solution: float
+    op: str = "="
+    solution_op: str = "="
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,13 @@ class LinearExpression:
 @dataclass(frozen=True)
 class QuadraticFunction:
     expression: str
+    a: float
+    b: float
+    c: float
+
+
+@dataclass(frozen=True)
+class QuadraticExpression:
     a: float
     b: float
     c: float
@@ -116,7 +125,7 @@ class FallbackSolver:
 
     def _try_arithmetic(self, text: str) -> float | int | None:
         expression = self._extract_arithmetic_expression(text)
-        if expression is None:
+        if expression is None or not self._is_likely_valid_math_syntax(expression):
             return None
         cleaned = self._prepare_math_ast_expression(expression)
         try:
@@ -126,39 +135,80 @@ class FallbackSolver:
             return None
         return int(value) if float(value).is_integer() else round(float(value), 6)
 
-    def _safe_eval(self, node: ast.AST) -> float:
+    def _safe_eval(self, node: ast.AST, depth: int = 0) -> float:
+        if depth > 30:
+            raise ValueError("Expression too deep")
+
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return float(node.value)
+            val = float(node.value)
+            if abs(val) > 1e50:
+                raise ValueError("Constant value too large")
+            return val
 
         if isinstance(node, ast.BinOp):
-            left = self._safe_eval(node.left)
-            right = self._safe_eval(node.right)
+            left = self._safe_eval(node.left, depth + 1)
+            right = self._safe_eval(node.right, depth + 1)
+            if abs(left) > 1e50 or abs(right) > 1e50:
+                raise ValueError("Operand too large")
+
             if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            if isinstance(node.op, ast.Pow):
-                return math.pow(left, right)
+                res = left + right
+            elif isinstance(node.op, ast.Sub):
+                res = left - right
+            elif isinstance(node.op, ast.Mult):
+                res = left * right
+            elif isinstance(node.op, ast.Div):
+                if math.isclose(right, 0.0):
+                    raise ZeroDivisionError("Division by zero")
+                res = left / right
+            elif isinstance(node.op, ast.Pow):
+                if abs(right) > 1000:
+                    raise ValueError("Exponent too large")
+                if abs(left) > 1e50 and right > 1:
+                    raise ValueError("Base too large")
+                try:
+                    res = math.pow(left, right)
+                except (OverflowError, ZeroDivisionError, ValueError):
+                    raise ValueError("Invalid power operation or overflow")
+            else:
+                raise ValueError("Unsupported operation")
+
+            if abs(res) > 1e50:
+                raise ValueError("Result overflow")
+            return res
 
         if isinstance(node, ast.UnaryOp):
-            value = self._safe_eval(node.operand)
+            value = self._safe_eval(node.operand, depth + 1)
+            if abs(value) > 1e50:
+                raise ValueError("Operand too large")
             if isinstance(node.op, ast.USub):
-                return -value
-            if isinstance(node.op, ast.UAdd):
-                return value
+                res = -value
+            elif isinstance(node.op, ast.UAdd):
+                res = value
+            else:
+                raise ValueError("Unsupported unary operation")
+
+            if abs(res) > 1e50:
+                raise ValueError("Result overflow")
+            return res
 
         raise ValueError("Unsupported arithmetic expression")
 
     def _try_linear_equation(self, text: str) -> LinearEquation | None:
         equation = self._extract_linear_equation(text)
-        if not equation or equation.count("=") != 1:
+        if not equation:
             return None
 
-        left_raw, right_raw = equation.split("=", 1)
+        # Find the comparison operator
+        op = None
+        for candidate_op in ["<=", ">=", "<", ">", "="]:
+            if candidate_op in equation:
+                op = candidate_op
+                break
+        if op is None or equation.count(op) != 1:
+            return None
+
+        left_raw, right_raw = equation.split(op, 1)
         left = self._parse_linear_side(left_raw)
         right = self._parse_linear_side(right_raw)
         if left is None or right is None:
@@ -170,6 +220,19 @@ class FallbackSolver:
         net_c = right_b - left_b
         if math.isclose(net_a, 0.0):
             return None
+
+        # Determine solution operator
+        solution_op = op
+        if net_a < 0:
+            if op == "<":
+                solution_op = ">"
+            elif op == ">":
+                solution_op = "<"
+            elif op == "<=":
+                solution_op = ">="
+            elif op == ">=":
+                solution_op = "<="
+
         return LinearEquation(
             raw=equation,
             left_a=left_a,
@@ -179,19 +242,25 @@ class FallbackSolver:
             net_a=net_a,
             net_c=net_c,
             solution=net_c / net_a,
+            op=op,
+            solution_op=solution_op,
         )
 
     def _build_linear_response(
         self, linear: LinearEquation
     ) -> tuple[SolveAnswer, list[SolveStep]]:
         original_latex = (
-            f"{self._format_linear_expression(linear.left_a, linear.left_b)} = "
+            f"{self._format_linear_expression(linear.left_a, linear.left_b)} {linear.op} "
             f"{self._format_linear_expression(linear.right_a, linear.right_b)}"
         )
         net_a_text = self._format_number(linear.net_a)
         net_c_text = self._format_number(linear.net_c)
         solution_text = self._format_number(linear.solution)
-        collected_latex = f"{self._format_linear_term(linear.net_a)} = {net_c_text}"
+        collected_latex = f"{self._format_linear_term(linear.net_a)} {linear.op} {net_c_text}"
+
+        flip_notice = ""
+        if linear.op != "=" and linear.net_a < 0:
+            flip_notice = " Since we are dividing by a negative number, we must flip the inequality sign."
 
         steps = [
             SolveStep(
@@ -199,10 +268,13 @@ class FallbackSolver:
                 title="Collect like terms",
                 explanation=(
                     "Move all x-terms to the left and constants to the right. "
+                    f"The inequality becomes {collected_latex}." if linear.op != "=" else
                     f"The equation becomes {collected_latex}."
                 ),
-                why_it_happens="Equivalent operations preserve the equality while simplifying the equation.",
+                why_it_happens="Equivalent operations preserve the relation while simplifying the expression.",
                 common_mistakes=[
+                    "Changing the sign incorrectly when moving a term across the comparison operator."
+                ] if linear.op != "=" else [
                     "Changing the sign incorrectly when moving a term across the equals sign."
                 ],
                 hints=["Keep x-terms and number terms in separate columns."],
@@ -211,18 +283,23 @@ class FallbackSolver:
             SolveStep(
                 index=2,
                 title="Solve for x",
-                explanation=f"Divide both sides by {net_a_text} to get x by itself.",
+                explanation=f"Divide both sides by {net_a_text} to get x by itself.{flip_notice}",
                 why_it_happens="Division by the coefficient reverses the multiplication attached to x.",
-                common_mistakes=["Dividing only one side of the equation."],
+                common_mistakes=[
+                    "Dividing only one side.",
+                    "Forgetting to flip the inequality sign when dividing by a negative number."
+                ] if linear.op != "=" else ["Dividing only one side of the equation."],
                 hints=[
+                    "Substitute a test value back into the original inequality to check the solution range."
+                ] if linear.op != "=" else [
                     "Substitute the value back into the original equation to check it."
                 ],
-                exam_tip="A quick substitution check catches most sign errors.",
-                latex=[f"x = {net_c_text}/{net_a_text} = {solution_text}"],
+                exam_tip="Always remember to flip the inequality direction when multiplying or dividing by a negative number." if linear.op != "=" else "A quick substitution check catches most sign errors.",
+                latex=[f"x {linear.solution_op} {solution_text}"],
             ),
         ]
         answer = SolveAnswer(
-            text=f"The solution is x = {solution_text}.", latex=f"x = {solution_text}"
+            text=f"The solution is x {linear.solution_op} {solution_text}.", latex=f"x {linear.solution_op} {solution_text}"
         )
         return answer, steps
 
@@ -466,7 +543,7 @@ class FallbackSolver:
         raw_candidates = cast(
             list[str],
             re.findall(
-                r"[0-9xX+\-*/^().\s]+=[0-9xX+\-*/^().\s]+",
+                r"[0-9xX+\-*/^().\s]+(?:<=|>=|<=|>=|<|>|=)[0-9xX+\-*/^().\s]+",
                 normalized,
             ),
         )
@@ -478,6 +555,8 @@ class FallbackSolver:
         return max(candidates, key=len) if candidates else None
 
     def _parse_linear_side(self, side: str) -> tuple[float, float] | None:
+        if not self._is_likely_valid_math_syntax(side):
+            return None
         prepared = self._prepare_math_ast_expression(side).replace("X", "x")
         try:
             tree = ast.parse(prepared, mode="eval")
@@ -486,9 +565,15 @@ class FallbackSolver:
             return None
         return expression.coefficient, expression.constant
 
-    def _linear_from_ast(self, node: ast.AST) -> LinearExpression:
+    def _linear_from_ast(self, node: ast.AST, depth: int = 0) -> LinearExpression:
+        if depth > 30:
+            raise ValueError("Expression too deep")
+
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-            return LinearExpression(0.0, float(node.value))
+            val = float(node.value)
+            if abs(val) > 1e50:
+                raise ValueError("Constant value too large")
+            return LinearExpression(0.0, val)
 
         if isinstance(node, ast.Name):
             if node.id != "x":
@@ -496,65 +581,89 @@ class FallbackSolver:
             return LinearExpression(1.0, 0.0)
 
         if isinstance(node, ast.UnaryOp):
-            value = self._linear_from_ast(node.operand)
+            value = self._linear_from_ast(node.operand, depth + 1)
+            if abs(value.coefficient) > 1e50 or abs(value.constant) > 1e50:
+                raise ValueError("Operand too large")
             if isinstance(node.op, ast.USub):
-                return LinearExpression(-value.coefficient, -value.constant)
-            if isinstance(node.op, ast.UAdd):
-                return value
+                coeff = -value.coefficient
+                const = -value.constant
+            elif isinstance(node.op, ast.UAdd):
+                coeff = value.coefficient
+                const = value.constant
+            else:
+                raise ValueError("Unsupported unary operation")
+
+            if abs(coeff) > 1e50 or abs(const) > 1e50:
+                raise ValueError("Result overflow")
+            return LinearExpression(coeff, const)
 
         if isinstance(node, ast.BinOp):
-            left = self._linear_from_ast(node.left)
-            right = self._linear_from_ast(node.right)
+            left = self._linear_from_ast(node.left, depth + 1)
+            right = self._linear_from_ast(node.right, depth + 1)
+            if (
+                abs(left.coefficient) > 1e50
+                or abs(left.constant) > 1e50
+                or abs(right.coefficient) > 1e50
+                or abs(right.constant) > 1e50
+            ):
+                raise ValueError("Operand too large")
+
             if isinstance(node.op, ast.Add):
-                return LinearExpression(
-                    left.coefficient + right.coefficient,
-                    left.constant + right.constant,
-                )
-            if isinstance(node.op, ast.Sub):
-                return LinearExpression(
-                    left.coefficient - right.coefficient,
-                    left.constant - right.constant,
-                )
-            if isinstance(node.op, ast.Mult):
+                coeff = left.coefficient + right.coefficient
+                const = left.constant + right.constant
+            elif isinstance(node.op, ast.Sub):
+                coeff = left.coefficient - right.coefficient
+                const = left.constant - right.constant
+            elif isinstance(node.op, ast.Mult):
                 if math.isclose(left.coefficient, 0.0):
-                    return LinearExpression(
-                        right.coefficient * left.constant,
-                        right.constant * left.constant,
-                    )
-                if math.isclose(right.coefficient, 0.0):
-                    return LinearExpression(
-                        left.coefficient * right.constant,
-                        left.constant * right.constant,
-                    )
-                raise ValueError("Nonlinear multiplication")
-            if isinstance(node.op, ast.Div):
+                    coeff = right.coefficient * left.constant
+                    const = right.constant * left.constant
+                elif math.isclose(right.coefficient, 0.0):
+                    coeff = left.coefficient * right.constant
+                    const = left.constant * right.constant
+                else:
+                    raise ValueError("Nonlinear multiplication")
+            elif isinstance(node.op, ast.Div):
                 if not math.isclose(right.coefficient, 0.0):
                     raise ValueError("Division by an expression containing x")
                 if math.isclose(right.constant, 0.0):
                     raise ZeroDivisionError("Division by zero")
-                return LinearExpression(
-                    left.coefficient / right.constant,
-                    left.constant / right.constant,
-                )
-            if isinstance(node.op, ast.Pow):
+                coeff = left.coefficient / right.constant
+                const = left.constant / right.constant
+            elif isinstance(node.op, ast.Pow):
                 if math.isclose(left.coefficient, 0.0) and math.isclose(
                     right.coefficient, 0.0
                 ):
-                    return LinearExpression(
-                        0.0, math.pow(left.constant, right.constant)
-                    )
-                if (
+                    if abs(right.constant) > 1000:
+                        raise ValueError("Exponent too large")
+                    if abs(left.constant) > 1e50 and right.constant > 1:
+                        raise ValueError("Base too large")
+                    try:
+                        val = math.pow(left.constant, right.constant)
+                    except (OverflowError, ZeroDivisionError, ValueError):
+                        raise ValueError("Invalid power operation or overflow")
+                    coeff = 0.0
+                    const = val
+                elif (
                     math.isclose(left.coefficient, 1.0)
                     and math.isclose(left.constant, 0.0)
                     and math.isclose(right.coefficient, 0.0)
                     and math.isclose(right.constant, 1.0)
                 ):
                     return left
-                if math.isclose(right.coefficient, 0.0) and math.isclose(
+                elif math.isclose(right.coefficient, 0.0) and math.isclose(
                     right.constant, 0.0
                 ):
-                    return LinearExpression(0.0, 1.0)
-                raise ValueError("Nonlinear power")
+                    coeff = 0.0
+                    const = 1.0
+                else:
+                    raise ValueError("Nonlinear power")
+            else:
+                raise ValueError("Unsupported operation")
+
+            if abs(coeff) > 1e50 or abs(const) > 1e50:
+                raise ValueError("Result overflow")
+            return LinearExpression(coeff, const)
 
         raise ValueError("Unsupported linear expression")
 
@@ -573,32 +682,15 @@ class FallbackSolver:
     def _parse_quadratic_coefficients(
         self, expression: str
     ) -> tuple[float, float, float] | None:
-        normalized = self._normalize_math_expression(expression)
-        normalized = normalized.replace("**", "^").replace(" ", "")
-        normalized = normalized.replace("*", "").replace("X", "x")
-        normalized = normalized.replace("-", "+-")
-        if normalized.startswith("+-"):
-            normalized = normalized[1:]
-        a = b = c = 0.0
-        for part in [piece for piece in normalized.split("+") if piece]:
-            if "x^2" in part:
-                coefficient = part.replace("x^2", "")
-                a += self._parse_coefficient(coefficient)
-            elif part.endswith("x"):
-                coefficient = part[:-1]
-                b += self._parse_coefficient(coefficient)
-            elif re.fullmatch(r"[-+]?\d+(?:\.\d+)?", part):
-                c += float(part)
-            else:
-                return None
-        return a, b, c
-
-    def _parse_coefficient(self, coefficient: str) -> float:
-        if coefficient in {"", "+"}:
-            return 1.0
-        if coefficient == "-":
-            return -1.0
-        return float(coefficient)
+        if not self._is_likely_valid_math_syntax(expression):
+            return None
+        prepared = self._prepare_math_ast_expression(expression).replace("X", "x")
+        try:
+            tree = ast.parse(prepared, mode="eval")
+            quad = self._quadratic_from_ast(tree.body)
+            return quad.a, quad.b, quad.c
+        except Exception:
+            return None
 
     def _normalize_math_expression(self, text: str) -> str:
         return (
@@ -652,3 +744,104 @@ class FallbackSolver:
         if math.isclose(numeric, round(numeric), abs_tol=1e-9):
             return str(int(round(numeric)))
         return f"{numeric:.6f}".rstrip("0").rstrip(".")
+
+    def _is_likely_valid_math_syntax(self, expression: str) -> bool:
+        if expression.count("(") != expression.count(")"):
+            return False
+        stripped = "".join(expression.split())
+        if not stripped:
+            return False
+        if stripped[0] in {"*", "/", "^", "."}:
+            return False
+        if stripped[-1] in {"+", "-", "*", "/", "^", "."}:
+            return False
+        return True
+
+    def _quadratic_from_ast(self, node: ast.AST, depth: int = 0) -> QuadraticExpression:
+        if depth > 30:
+            raise ValueError("Expression too deep")
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            val = float(node.value)
+            if abs(val) > 1e50:
+                raise ValueError("Constant value too large")
+            return QuadraticExpression(0.0, 0.0, val)
+
+        if isinstance(node, ast.Name):
+            if node.id != "x":
+                raise ValueError("Unsupported variable")
+            return QuadraticExpression(0.0, 1.0, 0.0)
+
+        if isinstance(node, ast.UnaryOp):
+            value = self._quadratic_from_ast(node.operand, depth + 1)
+            if abs(value.a) > 1e50 or abs(value.b) > 1e50 or abs(value.c) > 1e50:
+                raise ValueError("Operand too large")
+            if isinstance(node.op, ast.USub):
+                a, b, c = -value.a, -value.b, -value.c
+            elif isinstance(node.op, ast.UAdd):
+                a, b, c = value.a, value.b, value.c
+            else:
+                raise ValueError("Unsupported unary operation")
+
+            if abs(a) > 1e50 or abs(b) > 1e50 or abs(c) > 1e50:
+                raise ValueError("Result overflow")
+            return QuadraticExpression(a, b, c)
+
+        if isinstance(node, ast.BinOp):
+            left = self._quadratic_from_ast(node.left, depth + 1)
+            right = self._quadratic_from_ast(node.right, depth + 1)
+            if (
+                abs(left.a) > 1e50 or abs(left.b) > 1e50 or abs(left.c) > 1e50 or
+                abs(right.a) > 1e50 or abs(right.b) > 1e50 or abs(right.c) > 1e50
+            ):
+                raise ValueError("Operand too large")
+
+            if isinstance(node.op, ast.Add):
+                a = left.a + right.a
+                b = left.b + right.b
+                c = left.c + right.c
+            elif isinstance(node.op, ast.Sub):
+                a = left.a - right.a
+                b = left.b - right.b
+                c = left.c - right.c
+            elif isinstance(node.op, ast.Mult):
+                x4_coeff = left.a * right.a
+                x3_coeff = left.a * right.b + left.b * right.a
+                if not math.isclose(x4_coeff, 0.0) or not math.isclose(x3_coeff, 0.0):
+                    raise ValueError("Degree exceeds quadratic")
+                a = left.a * right.c + left.b * right.b + left.c * right.a
+                b = left.b * right.c + left.c * right.b
+                c = left.c * right.c
+            elif isinstance(node.op, ast.Div):
+                if not math.isclose(right.a, 0.0) or not math.isclose(right.b, 0.0):
+                    raise ValueError("Division by non-constant")
+                if math.isclose(right.c, 0.0):
+                    raise ZeroDivisionError("Division by zero")
+                a = left.a / right.c
+                b = left.b / right.c
+                c = left.c / right.c
+            elif isinstance(node.op, ast.Pow):
+                if not math.isclose(right.a, 0.0) or not math.isclose(right.b, 0.0):
+                    raise ValueError("Exponent must be constant")
+                exponent = right.c
+                if not exponent.is_integer() or exponent < 0 or exponent > 2:
+                    raise ValueError("Unsupported exponent for quadratic")
+                exp_int = int(exponent)
+                if exp_int == 0:
+                    a, b, c = 0.0, 0.0, 1.0
+                elif exp_int == 1:
+                    a, b, c = left.a, left.b, left.c
+                elif exp_int == 2:
+                    if not math.isclose(left.a, 0.0):
+                        raise ValueError("Squaring a quadratic exceeds degree 2")
+                    a = left.b ** 2
+                    b = 2 * left.b * left.c
+                    c = left.c ** 2
+            else:
+                raise ValueError("Unsupported operation")
+
+            if abs(a) > 1e50 or abs(b) > 1e50 or abs(c) > 1e50:
+                raise ValueError("Result overflow")
+            return QuadraticExpression(a, b, c)
+
+        raise ValueError("Unsupported quadratic expression")
