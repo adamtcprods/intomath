@@ -17,18 +17,6 @@ Students can type a prompt and receive:
 
 Image upload is available for configured OCR/model backends. For supported typed prompts, the backend now tries the local deterministic solver first, even when `OPENROUTER_API_KEY` is configured. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. An optional tiny Ollama detector can normalize borderline prompts into those supported shapes, but proof-style geometry stays on model-backed routing.
 
-## Why this rebuild exists
-
-The previous version relied too heavily on free-form LLM output and command retrieval for GeoGebra. That created unstable geometry constructions and made the product feel like a generic chatbot.
-
-IntoMath 2.0 fixes that by changing the architecture:
-
-- **Structured solver responses only**
-- **Configurable model routing**
-- **Geometry DSL instead of raw GeoGebra generation**
-- **Deterministic DSL → GeoGebra translation**
-- **Focused solver UI instead of a chat UI**
-
 ## Tech stack
 
 ### Frontend
