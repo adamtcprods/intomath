@@ -1,0 +1,12 @@
+= Plane through 3 Points Tool
+:page-en: tools/Plane_through_3_Points
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select three non collinear points to create the plane through the given points.
+
+[NOTE]
+====
+
+See also the xref:/commands/Plane.adoc[Plane] command.
+
+====

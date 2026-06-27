@@ -1,0 +1,23 @@
+= Dilate from Point Tool
+:page-en: tools/Dilate_from_Point
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This tool has different names in different variants of English:
+
+* Dilate Object from Point by Factor (US)  
+* Enlarge Object from Point by Factor (UK + Aus)  
+
+====
+
+Activate the tool, then select the object to be dilated and an existing point (or click/tap in the _Graphics View_ to create one) that will be the center of dilation.
+
+Enter the dilation factor into the input box of the appearing dialog window.
+
+[NOTE]
+====
+See also the xref:/commands/Dilate.adoc[Dilate] command.
+====

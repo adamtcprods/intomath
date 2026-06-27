@@ -1,0 +1,13 @@
+= Circle through 3 Points Tool
+:page-en: tools/Circle_through_3_Points
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select three existing points or click three distinct positions in the _Graphics View_ to create the circle through these points.
+
+[NOTE]
+====
+
+* If the points are collinear, the circle degenerates to the line these three points belong to.
+* See also the xref:/commands/Circle.adoc[Circle] command.
+
+====

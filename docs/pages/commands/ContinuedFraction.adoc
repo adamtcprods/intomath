@@ -1,0 +1,35 @@
+= ContinuedFraction Command
+:page-en: commands/ContinuedFraction
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+ContinuedFraction( <Number> )::
+  Creates the https://en.wikipedia.org/wiki/Continued_fraction[continued fraction] approximating a given number. The result is a LaTeX
+  xref:/Texts.adoc[text object]. The fraction is computed numerically within precision 10^-8^.
+
+[EXAMPLE]
+====
+
+`++ContinuedFraction(5.45)++` gives _stem:[5 + \frac{1}{ 2+ \frac{1}{4+ \frac{1}{ 1+ \frac{1}{ 1 } } } }]_
+
+====
+
+ContinuedFraction( <Number>, <Level> )::
+  Creates the continued fraction approximating the given number. The number of quotients is less than or equal to _Level_, but never exceeding the number of quotients needed to achieve the numerical precision of 10^-8^.
+
+[EXAMPLE]
+====
+
+`++ContinuedFraction(5.45, 3)++` gives _stem:[5 + \frac{1}{ 2+ \frac{1}{4+ ... } }]_
+
+====
+
+ContinuedFraction( <Number>, <Level> (optional), <Boolean Shorthand> )::
+  Creates the continued fraction approximating the given number. If the parameter _Level_ is specified, the number of quotients is less than or equal to _Level_, but never exceeding the number of quotients needed to achieve the numerical precision of 10^-8^. When _Shorthand_ is _true_, the LaTeX text uses a shorter syntax, and contains a list of the integer parts of the continued fraction.
+
+[EXAMPLE]
+====
+
+* `++ContinuedFraction(5.45, true)++` gives [_5; 2, 4, 1, 1_]
+* `++ContinuedFraction(5.45, 3, true)++` gives [_5; 2, 4, ..._]
+
+====

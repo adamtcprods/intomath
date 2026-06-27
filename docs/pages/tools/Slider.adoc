@@ -1,0 +1,54 @@
+= Slider Tool
+:page-en: tools/Slider
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then click or tap in the image:16px-Menu_view_graphics.svg.png[Menu view graphics.svg,width=16,height=16]
+xref:/Graphics_View.adoc[Graphics View] to create a slider for a number or an angle. The appearing dialog window allows to specify the _Name_, _Interval_ [_min_, _max_], and _Increment_ of the number or angle, as well as the _Alignment_, and its _Speed_ and _Animation_ mode.
+
+[NOTE]
+====
+
+* In GeoGebra, a slider is the graphical representation of a xref:/Numbers_and_Angles.adoc[free number or free angle].
+You can easily create a slider for any existing xref:/Numbers_and_Angles.adoc[free number or angle] by showing this
+object in the image:16px-Menu_view_graphics.svg.png[Menu view graphics.svg,width=16,height=16]
+xref:/Graphics_View.adoc[Graphics View]: just click the visibility circle to the left of the number.
+* In the apps, any time you create a xref:/Numbers_and_Angles.adoc[free number or free angle] in _Algebra View_, the corresponding slider is displayed in the same _View_. Toggle the visibility circle on the left of the slider in _Algebra View_ to display or hide it in the _Graphics View_.
+
+====
+
+The position of a slider can be absolute in the image:16px-Menu_view_graphics.svg.png[Menu view
+graphics.svg,width=16,height=16] _Graphics View_ (this means that the slider is not affected by zooming, but always
+remains in the visible part of the image:16px-Menu_view_graphics.svg.png[Menu view graphics.svg,width=16,height=16]
+_Graphics View_) or relative to the coordinate system. This setting can be changed afterwards in the
+image:16px-Menu-options.svg.png[Menu-options.svg,width=16,height=16] xref:/Properties_Dialog.adoc[Properties Dialog] of
+the corresponding number or angle.
+
+
+[NOTE]
+====
+
+Use the following shortcuts to enter a degree symbol ° or _pi (π)_ for the _interval_ and _increment_ of a slider:
+
+* [.kcode]#Alt# + [.kcode]#O# (Mac OS: [.kcode]#Ctrl# + [.kcode]#O#) for the degree symbol °
+* [.kcode]#Alt# + [.kcode]#P# (Mac OS: [.kcode]#Ctrl# + [.kcode]#P#) for the pi symbol _π_
+
+====
+
+
+
+
+== Fixed sliders
+
+Sliders created with the image:26px-Mode_slider.svg.png[Mode slider.svg,width=26,height=26] _Slider Tool_ are not fixed by default.
+Like other GeoGebra objects, sliders can be xref:/Object_Properties.adoc[fixed].
+Select the xref:/Context_Menu.adoc[context menu] or the image:16px-Menu-options.svg.png[Menu-options.svg,width=16,height=16]
+xref:/Properties_Dialog.adoc[Properties dialog] to change the setting and fix the slider. Once a slider is fixed, it can still be moved.
+Activate the image:26px-Mode_slider.svg.png[Mode slider.svg,width=26,height=26] _Slider Tool_ and drag the slider. 
+On non-touch devices, hold the right mouse button and drag to move the slider.
+
+[NOTE]
+====
+
+See also the xref:/commands/Slider.adoc[Slider] command.
+
+====

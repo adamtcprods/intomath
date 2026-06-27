@@ -1,0 +1,24 @@
+= Reflect about Line Tool
+:page-en: tools/Reflect_about_Line
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This tool has different names in different variants of English:
+
+* Reflect Object about Line (US)
+* Reflect Object in Line (UK + Aus)
+
+====
+
+Activate the tool, select the object to be reflected, then select a line to specify the mirror/line of reflection.
+
+[NOTE]
+====
+
+*  If the object to be reflected is not a line, the selection order can be reversed.
+* See also the xref:/commands/Reflect.adoc[Reflect] command.
+
+====

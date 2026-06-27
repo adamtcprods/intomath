@@ -1,0 +1,36 @@
+= Exponential Command
+:page-en: commands/Exponential
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Exponential( <Lambda>, <Variable Value> )::
+  Calculates the value of the cumulative distribution function of an Exponential distribution at _variable value v_, i.e. the
+  probability _P(X ≤ v)_ where _X_ is a random variable with an https://en.wikipedia.org/wiki/Exponential_distribution[Exponential
+  distribution] defined by the parameter _lambda_.
+
+[NOTE]
+====
+
+This syntax returns the probability at a given value, that is the area under the Exponential distribution curve to the left of the given _x_-coordinate.
+
+====
+
+Exponential( <Lambda>, <Variable Value>, <Boolean Cumulative> )::
+  If _Cumulative = true_, calculates the value of the cumulative distribution function of an Exponential distribution with given _lambda_ parameter at the given _variable value_, otherwise it calculates the probability density function of the distribution at _variable value_.
+
+Exponential( <Lambda>, x, <Boolean Cumulative> )::
+  If _Cumulative = true_, creates the cumulative density function (cdf) of an Exponential distribution with given _lambda_, othewise it creates the probability density function (pdf) of the distribution.
+
+
+
+== CAS Syntax
+
+Exponential( <Lambda>, <Variable Value> )::
+  Calculates the value of the cumulative distribution function of an Exponential distribution at _variable value v_, i.e. the
+  probability _P(X ≤ v)_ where _X_ is a random variable with Exponential distribution with parameter _lambda_.
+
+[EXAMPLE]
+====
+
+`++Exponential(2, 1)++` yields _stem:[1 - \frac{1}{e^{2} } ]_, which is approximately _0.86_.
+
+====

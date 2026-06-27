@@ -1,0 +1,12 @@
+= Vector Tool
+:page-en: tools/Vector
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select two existing points or click/tap two distinct positions in the _Graphics View_ to create the vector with the selected initial and terminal points.
+
+[NOTE]
+====
+
+See also the xref:/commands/Vector.adoc[Vector] command.
+
+====

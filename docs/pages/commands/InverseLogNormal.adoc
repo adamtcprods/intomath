@@ -1,0 +1,18 @@
+= InverseLogNormal Command
+:page-en: commands/InverseLogNormal
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+InverseLogNormal( <Mean>, <Standard Deviation>, <Probability> )::
+  Computes the inverse of the cumulative distribution function of a
+  https://en.wikipedia.org/wiki/Log-normal_distribution[log-normal distribution] at probability _p_, where the log-normal
+  distribution is defined by the given parameters _mean_ and _standard deviation_.
+  In other words, it finds _t_ such that _P(X ≤ t) = p_, where _X_ is a log-normal random variable.
+  Probability _p_ must be a value in the closed interval [_0, 1_].
+
+[EXAMPLE]
+====
+
+* `++InverseLogNormal(10, 20, 1/3)++` returns _3.997_.
+* `++InverseLogNormal(1000, 2, 1)++` returns stem:[ \infty ].
+
+====

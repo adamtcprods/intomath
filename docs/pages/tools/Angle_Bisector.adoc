@@ -1,0 +1,20 @@
+= Angle Bisector Tool
+:page-en: tools/Angle_Bisector
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then:
+
+* Select three points (e.g. _A_, _B_, and _C_) to create the angle bisector of angle _ABC_ (point _B_ is the vertex).
+
+or
+
+
+* Select two lines to create the bisectors of the angles formed by the lines.
+
+[NOTE]
+====
+
+* The direction vectors of all angle bisectors have length 1
+* See also the xref:/commands/AngleBisector.adoc[AngleBisector] command.
+
+====

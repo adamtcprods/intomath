@@ -1,0 +1,13 @@
+= Split Command
+:page-en: commands/Split
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Split( <Text>, <List of Texts to split on>)::
+  Creates the list of texts obtained by splitting the given text at the given separators (not included in the list).
+
+[EXAMPLE]
+====
+
+`++Split("3cos(t)cos(2y)", {"cos"})++` returns `++{"3", "(t)", "(2y)"}++`.
+
+====

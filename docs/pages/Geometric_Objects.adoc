@@ -1,0 +1,44 @@
+= Geometric Objects
+:page-en: Geometric_Objects
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+== Types of Geometric Objects
+
+GeoGebra works with many types of geometric objects
+
+* xref:/Points_and_Vectors.adoc[Points and Vectors]
+* xref:/Lines_and_Axes.adoc[Lines and Axes]
+* xref:/Conic_sections.adoc[Conic sections and Arcs]
+* xref:/Functions.adoc[Functions]
+* xref:/Curves.adoc[Curves]
+* xref:/Inequalities.adoc[Inequalities]
+* xref:/Intervals.adoc[Intervals]
+
+== Paths
+
+Lists of points, loci, and some of the above mentioned objects (lines, conic sections, arcs, polygons, functions, single
+variable inequalities, intervals) are referred to as _paths_. One can define a xref:/Points_and_Vectors.adoc[point] to
+belong to a path using the xref:/commands/Point.adoc[Point Command]. Each point on a path has a path parameter, which is
+a number ranging from 0 to 1. To get this parameter, you can use the xref:/commands/PathParameter.adoc[PathParameter
+Command].
+
+[NOTE]
+====
+
+xref:/Lists.adoc[Lists] of other paths are also paths.
+
+====
+
+== Regions
+
+You can also restrict points to a _region_ (polygon, conic, arc, two variable inequality) using the
+xref:/commands/PointIn.adoc[PointIn Command] or image:24px-Mode_pointonobject.svg.png[Mode
+pointonobject.svg,width=24,height=24] xref:/tools/Point_on_Object.adoc[Point on Object Tool].
+
+[NOTE]
+====
+
+See also image:24px-Mode_attachdetachpoint.svg.png[Mode attachdetachpoint.svg,width=24,height=24]
+xref:/tools/Attach_Detach_Point.adoc[Attach / Detach Point Tool].
+
+====

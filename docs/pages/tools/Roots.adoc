@@ -1,0 +1,12 @@
+= Roots Tool
+:page-en: tools/Roots
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select a function to find its roots. GeoGebra finds all the roots of polynomial functions, while for all the other functions it finds only the roots belonging to the visible interval of the Graphics View.
+
+[NOTE]
+====
+
+See also xref:/commands/Roots.adoc[Roots] command.
+
+====

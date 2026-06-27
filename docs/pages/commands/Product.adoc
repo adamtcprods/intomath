@@ -1,0 +1,77 @@
+= Product Command
+:page-en: commands/Product
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Product( <List of Raw Data> )::
+  Calculates the product of all numbers in the list.
+
+[EXAMPLE]
+====
+
+`++Product({2, 5, 8})++` yields _80_.
+
+====
+
+Product( <List of Numbers>, <Number of Elements> )::
+  Calculates the product of the first _n_ elements in the list.
+
+[EXAMPLE]
+====
+
+`++Product({1, 2, 3, 4}, 3)++` yields _6_.
+
+====
+
+Product( <List of Numbers>, <List of Frequencies> )::
+  Calculates the product of all elements in the _list of numbers_ raised to the value given in the _list of frequencies_
+  for each one of them.
+
+[EXAMPLE]
+====
+
+* `++Product({20, 40, 50, 60}, {4, 3, 2, 1})++` yields __1536000000000000__
+* `++Product({sqrt(2), cbrt(3), sqrt(5), cbrt(-7)}, {4, 3, 2, 3})++` yields _-420_
+
+====
+
+[NOTE]
+====
+
+The two lists must have the same length.
+
+====
+
+Product( <Expression>, <Variable>, <Start Value>, <End Value> )::
+  Calculates the product of the expressions that are obtained by replacing the given variable with every integer from the given
+  _start_ to the given _end_ values.
+
+[EXAMPLE]
+====
+
+* `++Product(k, k,  1, 7)++` yields 5040
+* `++Product(x + k,  k,  2, 3)++` yields _f_(_x_)=(_x_ + 2)(_x_ + 3).
+
+====
+
+== CAS Syntax
+
+Product( <List of Expressions> )::
+  Calculates the product of all elements in the list.
+
+[EXAMPLE]
+====
+
+`++Product({1, 2, x})++` yields _2x_.
+
+====
+
+Product( <Expression>, <Variable>, <Start Value>, <End Value> )::
+  Calculates the product of the expressions that are obtained by replacing the given variable with every integer from the given
+  _start_ to the given _end_ values.
+
+[EXAMPLE]
+====
+
+`++Product(x + 1,  x,  2, 3)++` yields _12_.
+
+====

@@ -1,0 +1,12 @@
+= Rotate around Line Tool
+:page-en: tools/Rotate_around_Line
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, select the object to be rotated, then select the axis (line, ray or segment) and enter the value of the angle of rotation in the displayed input box.
+
+[NOTE]
+====
+
+See also xref:/commands/Rotate.adoc[Rotate] command.
+
+====

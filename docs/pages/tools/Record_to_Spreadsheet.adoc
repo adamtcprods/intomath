@@ -1,0 +1,19 @@
+= Record to Spreadsheet Tool
+:page-en: tools/Record_to_Spreadsheet
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+
+Select objects and choose
+image:16px-Menu-record-to-spreadsheet.svg.png[Menu-record-to-spreadsheet.svg,width=16,height=16] *Record to Spreadsheet*
+in the xref:/Context_Menu.adoc[Context Menu], while the image:16px-Menu_view_spreadsheet.svg.png[Menu view
+spreadsheet.svg,width=16,height=16] _Spreadsheet View_ is opened.
+
+This works for numbers, points, and vectors.
+
+[NOTE]
+====
+
+GeoGebra will use the first two empty columns of the image:16px-Menu_view_spreadsheet.svg.png[Menu view
+spreadsheet.svg,width=16,height=16] _Spreadsheet View_ to record the values of the selected objects.
+
+====

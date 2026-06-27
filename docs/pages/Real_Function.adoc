@@ -1,0 +1,21 @@
+= Real Function
+:page-en: Real_Function
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+real( <Complex Number> )::
+  Returns the real part of a given xref:/Complex_Numbers.adoc[complex number].
+
+[EXAMPLE]
+====
+
+`++real(17 + 3 ί)++` yields _17_, the real part of the complex number _17 + 3 ί_.
+
+====
+
+[NOTE]
+====
+
+* The complex ί is obtained by pressing [.kcode]#ALT# + [.kcode]#i#.
+* See also xref:/Imaginary_Function.adoc[imaginary Function].
+
+====

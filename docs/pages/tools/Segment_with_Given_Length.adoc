@@ -1,0 +1,26 @@
+= Segment with Given Length Tool
+:page-en: tools/Segment_with_Given_Length
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This tool has different names in different variants of English:
+
+* Interval with Given Length from Point (Aus)
+* Segment with Given Length from Point (UK + US)
+
+====
+
+Activate the tool, then select an existing point or click/tap in the _Graphics View_ to define the first end point of the line segment. Enter the segment length in the
+appearing input box.
+
+[NOTE]
+====
+
+* This tool creates also the other end point of the segment. The segment can be rotated around the given end point by
+using the image:22px-Mode_move.svg.png[Mode move.svg,width=22,height=22]xref:/tools/Move.adoc[Move] tool.
+* See also the xref:/commands/Segment.adoc[Segment] command.
+
+====

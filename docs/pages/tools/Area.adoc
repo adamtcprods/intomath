@@ -1,0 +1,16 @@
+= Area Tool
+:page-en: tools/Area
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then:
+
+* Select a circle or an ellipse to measure their area and display it in _Algebra View_, and to create a dynamic text in _Graphics View_ containing the same value.
+* Select a polygon to measure its area and create a dynamic text in _Graphics View_ containing that value.
+
+
+[NOTE]
+====
+
+See also the xref:/commands/Area.adoc[Area] command.
+
+====

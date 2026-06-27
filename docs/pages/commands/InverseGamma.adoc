@@ -1,0 +1,8 @@
+= InverseGamma Command
+:page-en: commands/InverseGamma
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+InverseGamma( <Alpha>, <Beta>, <Probability> )::
+  Computes the inverse of the Gamma cumulative distribution with parameters _α_ and _β_ for a given probability _p_.
+  In other words, the command finds t such that _P(X ≤ t) = p_, where _X_ is a random variable with a Gamma distribution. Probability _p_ is any value in the interval [0,1].
+

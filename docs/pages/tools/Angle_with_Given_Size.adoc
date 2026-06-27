@@ -1,0 +1,14 @@
+= Angle with Given Size Tool
+:page-en: tools/Angle_with_Given_Size
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select two existing points or click/tap two distinct positions in the _Graphics View_ to specify a point on the initial side and the vertex of the angle, respectively. Finally enter the angle size into the displayed input box. 
+
+
+[NOTE]
+====
+
+* This tool creates also a new point, that with the already specified vertex defines the terminal side of the angle.
+* See also the xref:/commands/Angle.adoc[Angle] command
+
+====

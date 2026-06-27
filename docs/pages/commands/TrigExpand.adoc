@@ -1,0 +1,76 @@
+= TrigExpand Command
+:page-en: commands/TrigExpand
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+TrigExpand( <Expression> )::
+  Expands trigonometric functions of a sum of variables into trigonometric functions of a single variable, or expands products of trigonometric functions into linear expressions.
+
+[EXAMPLE]
+====
+
+`++TrigExpand(tan(x + y))++` gives stem:[\frac{\frac{\sin(x)}{\cos(x)}+\frac{\sin(y)}{\cos(y)}}
+{1-\frac{\sin(x)}{\cos(x)} \cdot \frac{\sin(y)}{\cos(y)}} ].
+
+
+`++TrigExpand(sin(x)sin(x/3))++` gives stem:[\frac{1}{2} \; \cos \left( 2 \cdot \frac{x}{3} \right) -
+\frac{1}{2} \; \cos \left( 4 \cdot \frac{x}{3} \right) ].
+
+====
+
+TrigExpand( <Expression>, <Target Function> )::
+  Expands trigonometric functions of a sum of variables into expressions containing (when possible) the given target function of a single variable.
+
+[EXAMPLE]
+====
+
+`++TrigExpand(tan(x + y), tan(x))++` gives stem:[\frac{-\tan(x) - \tan(y)}{\tan(x) \tan(y) - 1}].
+
+====
+
+== CAS Syntax
+
+CAS syntaxes may show different results, depending on the selected output mode:
+
+[EXAMPLE]
+====
+
+`++TrigExpand(tan(x + y))++` in image:32px-Mode_evaluate.svg.png[Mode evaluate.svg,width=32,height=32] _Evaluate_ mode
+gives stem:[\frac{\frac{\sin(x)}{\cos(x)}+\frac{\sin(y)}{\cos(y)}} {1-\frac{\sin(x)}{\cos(x)} \cdot
+\frac{\sin(y)}{\cos(y)}} ] in image:32px-Mode_numeric.svg.png[Mode numeric.svg,width=32,height=32] _Numeric_ mode gives
+stem:[\frac{\sin(x) \cos(y) + \sin(y) \cos(x)}{- \sin(x) \sin(y) +\cos(x) \cos(y) }] .
+
+====
+
+The following commands are only available in the image:16px-Menu_view_cas.svg.png[Menu view cas.svg,width=16,height=16]
+xref:/CAS_View.adoc[CAS View]:
+
+TrigExpand( <Expression>, <Target Function>, <Target Variable> )::
+  Expands trigonometric expressions into expressions containing (when possible) only the given target function and variable.
+
+[EXAMPLE]
+====
+
+* `++TrigExpand(sin(x), sin(x), x/2)++` gives stem:[2\cos \left( \frac{x}{2} \right) \sin \left( \frac{x}{2} \right) ]
+* `++TrigExpand(sin(x)/(1+cos(x)), tan(x), x/2)++` gives stem:[\tan \left( \frac{x}{2} \right)].
+
+====
+
+TrigExpand( <Expression>, <Target Function>, <Target Variable>, <Target Variable> )::
+  Expands trigonometric expressions into expressions containing (when possible) only the given target function and variables.
+
+
+[EXAMPLE]
+====
+
+`++TrigExpand(csc(x) - cot(x) + csc(y) - cot(y), tan(x), x/2, y/2)++` gives stem:[\tan \left( \frac{x}{2} \right) +\tan
+\left( \frac{y}{2} \right) ].
+
+====
+
+[NOTE]
+====
+
+See also xref:/commands/TrigSimplify.adoc[TrigSimplify Command] and xref:/commands/TrigCombine.adoc[TrigCombine
+Command].
+
+====

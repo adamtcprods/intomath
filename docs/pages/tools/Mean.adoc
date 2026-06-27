@@ -1,0 +1,13 @@
+= Mean Tool
+:page-en: tools/Mean
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+This tool is available only in the image:16px-Menu_view_spreadsheet.svg.png[Menu view
+spreadsheet.svg,width=16,height=16] xref:/Spreadsheet_View.adoc[Spreadsheet View], and it can be used in two possible ways:
+
+* Select a destination cell, select the tool, then select a cell range. The mean of the selected cells will be displayed in the destination cell.
+* Select a cell range containing more than one cell, then select the tool. 
+** If the range has multiple rows, the mean of each column will be displayed below each column. If you need to calculate the mean of rows, hold [.kcode]#Shift# while selecting the tool: the mean of each row will be displayed to the right of the selected data.
+** If the range has only one row, the mean will be displayed in the first free cell to the right of the selected data.
+
+

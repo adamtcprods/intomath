@@ -1,0 +1,14 @@
+= Prism Tool
+:page-en: tools/Prism
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, select or create a polygon as bottom base, then select or create a vertex of the top base.
+
+[NOTE]
+====
+
+* The vertex selected for the top base will be connected to the vertex of the bottom base that has been created or selected as first.
+
+* See also the xref:/commands/Prism.adoc[Prism] command.
+
+====

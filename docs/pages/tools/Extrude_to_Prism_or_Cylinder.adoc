@@ -1,0 +1,11 @@
+= Extrude to Prism or Cylinder Tool
+:page-en: tools/Extrude_to_Prism_or_Cylinder
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then:
+
+* Select and drag a polygon or a circle to create a right prism or cylinder.
+
+or
+
+* Select a polygon or a circle, then enter the value of the altitude in the appearing input box to create a right prism or cylinder. In Classic v.5, the checkbox "Positive values follow the view" is active by default and sets the positive direction of the altitude of the prism or cylinder towards the user.

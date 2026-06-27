@@ -1,0 +1,31 @@
+= ChiSquared Command
+:page-en: commands/ChiSquared
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+ChiSquared( <Degrees of Freedom>, <Variable Value> )::
+  Calculates the value of the cumulative distribution function of a Chi squared distribution at _variable value_ _v_, i.e. the
+  probability _P(X ≤ v)_ where _X_ is a random variable with a Chi squared distribution with the given _degrees of freedom_.
+
+[EXAMPLE]
+====
+
+`++ChiSquared(4, 3)++` yields stem:[\gamma\left(2, \frac{3}{2}\right)], which is approximately _0.44_.
+
+====
+
+[NOTE]
+====
+
+This syntax returns the probability at a given _x_-coordinate's value, that is the area under the Chi squared distribution curve to the left of the given _x_-coordinate.
+
+====
+
+ChiSquared( <Degrees of Freedom>, <Variable Value>, <Boolean Cumulative> )::
+  If _Cumulative = true_, calculates the value of the cumulative distribution function of a Chi squared distribution with given _degrees of freedom_ at the given _variable value_, otherwise it calculates the probability density function of the distribution at _variable value_.
+
+ChiSquared( <Degrees of Freedom>, x, <Boolean Cumulative> )::
+  If _Cumulative = true_, creates the cumulative density function (cdf) of a https://en.wikipedia.org/wiki/Chi-square_distribution[Chi squared
+  distribution] with the given degrees of freedom, othewise it creates the probability density function (pdf) of the distribution.
+
+
+

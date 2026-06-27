@@ -1,0 +1,23 @@
+= Reflect about Circle Tool
+:page-en: tools/Reflect_about_Circle
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This tool has different names in different variants of English:
+
+* Reflect about Circle (US)  
+* Reflect in Circle (UK + Aus)  
+
+====
+
+Activate the tool, then select the object to invert (mirror) and a circle to reflect the object about the circle.
+
+[NOTE]
+====
+
+See also xref:/commands/Reflect.adoc[Reflect] command.
+
+====

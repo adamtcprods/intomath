@@ -1,0 +1,8 @@
+= NormalQuantilePlot Command
+:page-en: commands/NormalQuantilePlot
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+NormalQuantilePlot( <List of Raw Data> )::
+  Creates a normal quantile plot from the given list of data and draws a line through the points showing the ideal plot
+  for exactly normal data. Points are formed by plotting data values on the _x_-axis against their expected normal score
+  (Z-score) on the _y_-axis. More precisely the _y_-values are computed using Filliben's estimate.

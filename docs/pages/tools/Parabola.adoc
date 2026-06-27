@@ -1,0 +1,13 @@
+= Parabola Tool
+:page-en: tools/Parabola
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select in any order an existing point (or click/tap in the _Graphics View_) to specify the focus, and the directrix line of the parabola.
+
+[NOTE]
+====
+
+* When the directrix line is selected first, a preview of the resulting parabola is shown.
+* See also the xref:/commands/Parabola.adoc[Parabola] command.
+
+====

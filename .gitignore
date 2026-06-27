@@ -1,0 +1,21 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+backend/*.sqlite3
+
+# Frontend / Bun
+frontend/node_modules/
+frontend/.next/
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+
+# Env
+backend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db

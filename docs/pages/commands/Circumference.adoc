@@ -1,0 +1,20 @@
+= Circumference Command
+:page-en: commands/Circumference
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Circumference(Conic)::
+  If the given conic is a circle or ellipse, this command returns its circumference. Otherwise the result is undefined.
+
+[EXAMPLE]
+====
+
+`++Circumference(x^2 + 2y^2 = 1)++` yields _5.4_.
+
+====
+
+[NOTE]
+====
+
+See also xref:/commands/Perimeter.adoc[Perimeter] command.
+
+====

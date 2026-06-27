@@ -1,0 +1,25 @@
+= Circle with Center through Point Tool
+:page-en: tools/Circle_with_Center_through_Point
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This tool has different names in different variants of English:
+
+* Circle with Center through Point (US)  
+* Circle with Centre through Point (UK + Aus)  
+
+====
+
+Activate the tool, then select an existing point (or click at a position in the _Graphics View_ to create one) that will be the center of the circle.
+
+Drag to create the circle, and set its radius by selecting another existing point or clicking in the _Graphics View_.
+
+[NOTE]
+====
+
+See also the xref:/commands/Circle.adoc[Circle] command.
+
+====

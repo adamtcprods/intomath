@@ -1,0 +1,30 @@
+= Weibull Command
+:page-en: commands/Weibull
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Weibull( <Shape>, <Scale>, <Variable Value> )::
+  Evaluates the cumulative distribution function of a Weibull distribution at _variable value v_, i.e. calculates the
+  probability _P(X ≤ v)_ where _X_ is a random variable with a Weibull distribution defined by the given parameters _shape_ and _scale_.
+
+[EXAMPLE]
+====
+
+* `++Weibull(0.5, 1, 0)++` yields _0_.
+* `++Weibull(0.5, 1, 1)++` yields _stem:[1 - \frac{1} { e } ]._
+
+====
+
+[NOTE]
+====
+
+This syntax returns the probability at a given value, that is the area under the Weibull distribution curve to the left of the given _x_-coordinate.
+
+====
+
+Weibull( <Shape>, <Scale>, <Variable Value>, <Boolean Cumulative> )::
+  If _Cumulative = true_, evaluates the cumulative distribution function of a Weibull distribution with given _shape_ and _scale_ at the given _variable value_, otherwise it evaluates the probability density function of the distribution at _variable value_.
+
+Weibull( <Shape>, <Scale>, x, <Boolean Cumulative> )::
+ If _Cumulative = true_, creates the cumulative density function (cdf) of a Weibull distribution with given _shape_ and _scale_, otherwise it creates the probability density function (pdf) of the distribution.
+
+

@@ -1,0 +1,11 @@
+= Surface Of Revolution Tool
+:page-en: tools/Surface_of_Revolution
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then:
+
+* Select a function (or another object, eg. a segment) to create the surface of revolution of the selected generatrix about the _x_-axis. 
+
+or
+
+* Drag a function (or another object, eg. a segment) to create the desired portion of the surface of revolution of the selected generatrix about the _x_-axis.

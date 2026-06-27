@@ -1,0 +1,15 @@
+= GeoGebra Commands
+:page-en: commands/GeoGebra_Commands
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+* xref:/commands/AxisStepX.adoc[AxisStepX]
+* xref:/commands/AxisStepY.adoc[AxisStepY]
+* xref:/commands/CASLoaded.adoc[CASLoaded]
+* xref:/commands/ConstructionStep.adoc[ConstructionStep]
+* xref:/commands/Corner.adoc[Corner]
+* xref:/commands/DynamicCoordinates.adoc[DynamicCoordinates]
+* xref:/commands/Name.adoc[Name]
+* xref:/commands/Object.adoc[Object]
+* xref:/commands/SetConstructionStep.adoc[SetConstructionStep]
+* xref:/commands/SlowPlot.adoc[SlowPlot]
+* xref:/commands/ToolImage.adoc[ToolImage]

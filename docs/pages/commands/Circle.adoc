@@ -1,0 +1,51 @@
+:page-revisar:
+= Circle Command
+:page-en: commands/Circle
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Circle( <Point>, <Radius Number> )::
+  Yields a circle with given center and radius.
+Circle( <Point>, <Segment> )::
+  Yields a circle with given center and radius equal to the length of the given segment.
+Circle( <Point>, <Point> )::
+  Yields a circle with given center through a given point.
+Circle( <Point>, <Point>, <Point> )::
+  Yields a circle through the three given points (if they do not lie on the same line).
+
+[NOTE]
+====
+
+See also image:20px-Mode_compasses.svg.png[Mode compasses.svg,width=20,height=20] xref:/tools/Compass.adoc[Compass],
+image:20px-Mode_circle2.svg.png[Mode circle2.svg,width=20,height=20]
+xref:/tools/Circle_with_Center_through_Point.adoc[Circle with Center through Point],
+image:20px-Mode_circlepointradius.svg.png[Mode circlepointradius.svg,width=20,height=20]
+xref:/tools/Circle_with_Center_and_Radius.adoc[Circle with Center and Radius], and image:20px-Mode_circle3.svg.png[Mode
+circle3.svg,width=20,height=20] xref:/tools/Circle_through_3_Points.adoc[Circle through 3 Points] tools.
+
+====
+
+Circle( <Line>, <Point> )::
+  Creates a circle with line as axis and through the point.
+Circle( <Point>, <Radius>, <Direction> )::
+  Creates a circle with center, radius, and axis parallel to direction, which can be a line, vector or plane.
+Circle( <Point>, <Point>, <Direction> )::
+  Creates a circle with center, through a point, and axis parallel to direction.
+
+[NOTE]
+====
+
+In order to avoid the ambiguity line/plane of notations in 2D and 3D, don't use equations like `++x = 0++` or `++y = 0++` for the _Direction_.
+For example, you want the _Direction_ to be the plane `++x = 0++`, use an expression like `++x + 0y + 0z = 0++` instead.
+
+====
+
+[NOTE]
+====
+
+See also xref:/tools/Circle_with_Axis_through_Point.adoc[image:24px-Mode_circleaxispoint.svg.png[Mode
+circleaxispoint.svg,width=24,height=24]] xref:/tools/Circle_with_Axis_through_Point.adoc[Circle with Axis through Point] and xref:/tools/Circle_with_Center_Radius_and_Direction.adoc[image:24px-Mode_circlepointradiusdirection.svg.png[Mode
+circlepointradiusdirection.svg,width=24,height=24]] xref:/tools/Circle_with_Center_Radius_and_Direction.adoc[Circle with Center, Radius and Direction] tools.
+
+====
+
+

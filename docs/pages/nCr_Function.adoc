@@ -1,0 +1,45 @@
+= nCr Function
+:page-en: nCr_Function
+:page-aliases: commands/BinomialCoefficient.adoc
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+
+This command is autocompleted in GeoGebra input line as command `nCr(n, r)`.
+
+====
+
+nCr( <Number n>, <Number r> )::
+  Calculates the binomial coefficient stem:[ n \choose r ], i.e. it counts the number of ways to choose _r_ objects out of _n_ without repetitions (combinations).
+  As an alias, `BinomialCoefficient(n, r)` can be also used.
+
+
+[EXAMPLE]
+====
+
+`++nCr(5, 3)++` yields _10_.
+
+====
+
+[NOTE]
+====
+
+In the image:16px-Menu_view_cas.svg.png[Menu view cas.svg,width=16,height=16] xref:/CAS_View.adoc[CAS View] it is possible to use variables as command arguments: in this case the command returns a formula for the binomial coefficient.
+
+====
+
+[EXAMPLE]
+====
+
+`++nCr(n, 3)++` yields stem:[\frac{n^3 - 3 n^2 + 2 n}{6}].
+
+====
+
+
+[NOTE]
+====
+
+See also xref:/nPr_Function.adoc[nPr function].
+
+====

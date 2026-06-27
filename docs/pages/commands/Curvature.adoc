@@ -1,0 +1,16 @@
+= Curvature Command
+:page-en: commands/Curvature
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+
+Curvature( <Point>, <Object> )::
+  Yields the curvature of the object (function, curve, conic) at the given point.
+
+[EXAMPLE]
+====
+
+* `++Curvature((0 ,0), x^2)++` yields _2_
+* `++Curvature((0, 0), Curve(cos(t), sin(2t), t, 0, π))++` yields _0_
+* `++Curvature((-1, 0), Conic({1, 1, 1, 2, 2, 3}))++` yields _2_
+
+====

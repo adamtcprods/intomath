@@ -1,0 +1,22 @@
+= Ends Command
+:page-en: commands/Ends
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Ends( <Quadric> )::
+  Creates the top and the bottom of the limited quadric.
+
+[EXAMPLE]
+====
+
+* `++Ends( cylinder )++` yields two circles.
+* `++Ends( cone )++` yields a circle and the cone end (point).
+
+====
+
+[NOTE]
+====
+
+See also xref:./Top.adoc[Top Command], xref:./Bottom.adoc[Bottom Command] and
+xref:./Side.adoc[Side Command].
+
+====

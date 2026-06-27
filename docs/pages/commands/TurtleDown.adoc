@@ -1,0 +1,13 @@
+= TurtleDown Command
+:page-en: commands/TurtleDown
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+TurtleDown( <Turtle> )::
+
+Authorizes the turtle named to trace its movement from now.
+
+[NOTE]
+====
+
+See also command xref:/commands/TurtleUp.adoc[TurtleUp]
+====

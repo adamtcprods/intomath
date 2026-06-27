@@ -1,0 +1,67 @@
+= GCD Command
+:page-en: commands/GCD
+:page-aliases: commands/HCF.adoc
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+image:64px-Globe.png[Globe.png,width=64,height=64,role=left]
+
+This command differs among variants of English:
+
+* GCD (US)
+* HCF (UK + Aus)
+
+====
+
+GCD( <Number>, <Number> )::
+  Calculates the greatest common divisor of the two numbers .
+
+[EXAMPLE]
+====
+
+`++GCD(12, 15)++` yields _3_.
+
+====
+
+GCD( <List of Numbers> )::
+  Calculates the greatest common divisor of the list of numbers.
+
+[EXAMPLE]
+====
+
+`++GCD({12, 30, 18})++` yields _6_.
+
+====
+
+== CAS Syntax
+In the image:16px-Menu_view_cas.svg.png[Menu view
+cas.svg,width=16,height=16] xref:/CAS_View.adoc[CAS View] you can also use the following syntax:
+
+
+GCD( <Polynomial>, <Polynomial> )::
+  Calculates the greatest common divisor of the two polynomials.
+
+[EXAMPLE]
+====
+
+`++GCD(x^2 + 4 x + 4, x^2 - x - 6)++` yields _x + 2_.
+
+====
+
+GCD( <List of Polynomials> )::
+  Calculates the greatest common divisor of the list of polynomials.
+
+[EXAMPLE]
+====
+
+`++GCD({x^2 + 4 x + 4, x^2 - x - 6, x^3 - 4 x^2 - 3 x + 18})++` yields _x + 2_.
+
+====
+
+[NOTE]
+====
+
+See also xref:/commands/LCM.adoc[LCM Command] and xref:/commands/ExtendedGCD.adoc[ExtendedGCD Command].
+
+====

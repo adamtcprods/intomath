@@ -1,0 +1,12 @@
+= Cone Tool
+:page-en: tools/Cone
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, select or create the center of the base, select or create the apex, then enter the radius of the base in the appearing input box to create the right cone having the specified base and height.
+
+[NOTE]
+====
+
+See also the xref:/commands/Cone.adoc[Cone] and xref:/commands/InfiniteCone.adoc[InfiniteCone] commands.
+
+====

@@ -1,0 +1,23 @@
+= Pen Tool
+:page-en: tools/Pen
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+The _Pen Tool_ creates freehand notes and drawings in the image:16px-Menu_view_graphics.svg.png[Menu view
+graphics.svg,width=16,height=16] xref:/Graphics_View.adoc[Graphics View]. This makes the _Pen Tool_ particularly useful
+when using GeoGebra for presentations or with multimedia interactive whiteboards. To add a freehand note onto a region
+of the image:16px-Menu_view_graphics.svg.png[Menu view graphics.svg,width=16,height=16] _Graphics View_, activate the
+tool and draw using your finger or a pen (touch devices), or use a mouse while pressing and holding the leftbutton and releasing it when done (non-touch devices).
+
+GeoGebra stores the note you traced in the image:16px-Menu_view_graphics.svg.png[Menu view
+graphics.svg,width=16,height=16] _Graphic View_ as a _stroke_ object, to which it is possible to apply some actions and geometric transformations (e.g. move, rotate, reflect,...).
+
+The default colour of the pen is black, but the pen properties (colour, style, and thickness) can be changed using the
+xref:/Style_Bar.adoc[Styling Bar].
+
+== Erasing
+
+To erase a portion of your note created with the _Pen Tool_ in the image:16px-Menu_view_graphics.svg.png[Menu view
+graphics.svg,width=16,height=16] _Graphics View_, select the xref:/tools/Delete.adoc[Delete Tool] and move your finger (touch devices) or the mouse pointer while pressing and holding the left button over the part you want to erase. 
+For non-touch devices it is also possible to erase part of a note by pressing and holding the right mouse button while moving the cursor over it and releasing the button when done. 
+
+To delete a pen _stroke_ completely, select _Delete_ in the xref:/Context_Menu.adoc[Context Menu] of the object in _Algebra View_ or _Graphics View_.

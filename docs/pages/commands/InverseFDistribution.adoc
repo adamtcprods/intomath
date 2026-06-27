@@ -1,0 +1,10 @@
+= InverseFDistribution Command
+:page-en: commands/InverseFDistribution
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+InverseFDistribution( <Numerator Degrees of Freedom>, <Denominator Degrees of Freedom>, <Probability> )::
+  Computes the inverse of the cumulative distribution function of an
+  https://en.wikipedia.org/wiki/F-distribution[F-distribution] at probability _p_, where the F-distribution is defined by
+  the given _degrees of freedom_.
+  In other words, it finds _t_ such that _P(X ≤ t) = p_, where _X_ is a random variable with an F-distribution.
+  Probability _p_ must be a value in the closed interval [0,1].

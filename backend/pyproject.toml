@@ -1,0 +1,23 @@
+[project]
+name = "intomath-backend"
+version = "2.0.0"
+description = "IntoMath 2.0 backend"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.14",
+  "uvicorn[standard]>=0.35.0",
+  "pydantic>=2.11.7",
+  "pydantic-settings>=2.10.1",
+  "sqlalchemy>=2.0.41",
+  "psycopg[binary]>=3.2.9",
+  "httpx>=0.28.1",
+  "python-multipart>=0.0.20",
+  "pillow>=11.0.0",
+  "torch>=2.5.0",
+  "transformers>=4.47.0",
+  "pytest>=8.4.1"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

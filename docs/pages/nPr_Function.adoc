@@ -1,0 +1,33 @@
+= nPr Function
+:page-en: nPr_Function
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+nPr ( <Number n>, <Number r> )::
+  Returns the number of possible permutations without repetition of _r_ elements out of a list of _n_ elements.
+
+[EXAMPLE]
+====
+
+`++nPr(10, 2)++` yields _90_.
+
+====
+
+== CAS Syntax
+
+nPr ( <Number n>, <Number r> )::
+  Returns the number of possible permutations without repetition of _r_ elements out of a list of _n_ elements.
+
+[EXAMPLE]
+====
+
+* `++nPr(10, 2)++` yields _90_.
+* `++nPr(n, 3)++` yields _stem:[\frac{n!}{(n-3)!}]_.
+
+====
+
+[NOTE]
+====
+
+See also xref:/commands/BinomialCoefficient.adoc[BinomialCoefficient command].
+
+====

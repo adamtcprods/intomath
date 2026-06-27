@@ -1,0 +1,13 @@
+= Cylinder Tool
+:page-en: tools/Cylinder
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, select or create the center of the bottom base, select or create the center of the top base, then enter the radius of the bases in the appearing input box to create the right cylinder having the specified bases.
+
+
+[NOTE]
+====
+
+See also the xref:/commands/Cylinder.adoc[Cylinder] and xref:/commands/InfiniteCylinder.adoc[InfiniteCylinder] commands.
+
+====

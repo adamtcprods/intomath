@@ -1,0 +1,33 @@
+= Move Graphics View Tool
+:page-en: tools/Move_Graphics_View
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+== In image:22px-Menu_view_graphics.svg.png[Menu view graphics.svg,width=22,height=22] Graphics View
+
+Activate the tool, then two possible actions are available:
+
+* drag the background of the image:16px-Menu_view_graphics.svg.png[Menu view
+graphics.svg,width=16,height=16] xref:/Graphics_View.adoc[Graphics View] to change its visible area
+* drag the coordinate axes to scale them.
+
+[NOTE]
+====
+
+Regardless of the selected xref:/Tools.adoc[tool], the background of the _Graphics View_ can be moved or the axes scaled by pressing 
+the [.kcode]#Shift# key (MS Windows: also [.kcode]#Ctrl# key) and dragging with the mouse (desktop version only).
+
+====
+
+== In image:22px-Perspectives_algebra_3Dgraphics.svg.png[Perspectives algebra 3Dgraphics.svg,width=22,height=22] 3D Graphics View
+
+Activate the tool, then two possible actions are available:
+
+* drag the background of the image:16px-Perspectives_algebra_3Dgraphics.svg.png[Perspectives algebra 3Dgraphics.svg,width=16,height=16] _3D Graphics
+View_ to change its visible area
+* drag the coordinate axes to scale them.
+
+By clicking (or tapping) the background of the image:16px-Perspectives_algebra_3Dgraphics.svg.png[Perspectives algebra 3Dgraphics.svg,width=16,height=16] _3D Graphics
+View_ it is possible to toggle between two panning modes:
+
+* *Mode _x_-_y_-plane*: shifts the current view parallel to the _x_-_y_-plane.
+* *Mode _z_-axis*: shifts the current view parallel to the _z_-axis.

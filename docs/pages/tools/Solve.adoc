@@ -1,0 +1,17 @@
+= Solve Tool
+:page-en: tools/Solve
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+You can use this tool only in image:16px-Menu_view_cas.svg.png[Menu view cas.svg,width=16,height=16]
+xref:/CAS_View.adoc[CAS View]. There are two methods how to use it:
+
+* Type the equation to solve, then select the tool.
+* Select an evaluated equation, then select the tool.
+
+[NOTE]
+====
+
+* This tool can solve a system of equations as well. Enter each equation in separate cells, select all those cells, then select the tool to get the solutions for each variable.
+* See also the xref:/commands/Solve.adoc[Solve] command.
+
+====

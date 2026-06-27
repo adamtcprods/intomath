@@ -1,0 +1,24 @@
+= QRDecomposition Command
+:page-en: commands/QRDecomposition
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+== CAS Syntax
+
+QRDecomposition( <Matrix> )::
+  Calculates the https://en.wikipedia.org/wiki/QR_decomposition[QR decomposition] of the given matrix.
+
+[EXAMPLE]
+====
+
+`++QRDecomposition({{1,2},{3,4}})++` returns the matrices
+stem:[\begin{pmatrix}\frac{1}{\sqrt{10}}&\frac{3/5}{\sqrt{10}/5}\\\frac{3}{\sqrt{10}}&-\frac{1/5}{\sqrt{10}/5}\end{pmatrix}] and
+stem:[\begin{pmatrix}\sqrt{10}&7/5\sqrt{10}\\0&\sqrt{10}/5\end{pmatrix}].
+
+====
+
+[NOTE]
+====
+
+See also xref:/commands/LUDecomposition.adoc[LUDecomposition] command.
+
+====

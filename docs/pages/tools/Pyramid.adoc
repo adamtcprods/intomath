@@ -1,0 +1,12 @@
+= Pyramid Tool
+:page-en: tools/Pyramid
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, select or create a polygon as base, then select or create the apex point.
+
+[NOTE]
+====
+
+See also the xref:/commands/Pyramid.adoc[Pyramid] command.
+
+====

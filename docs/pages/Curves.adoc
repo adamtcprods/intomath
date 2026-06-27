@@ -1,0 +1,58 @@
+= Curves
+:page-en: Curves
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+GeoGebra supports the following types of curves:
+
+== Parametric curves
+
+Parametric curves of the form _a(t)_ = _(f(t), g(t))_ where _t_ is real parameter within a certain range can be created:
+
+* using the xref:/commands/Curve.adoc[Curve Command] or
+* by typing their expression directly in the _input bar_, e.g.`++(t^2,t^3)++`.
+
+Parametric curves can be used as arguments in the following commands: xref:/commands/Tangent.adoc[Tangent],
+xref:/commands/Point.adoc[Point], xref:/commands/Intersect.adoc[Intersect], xref:/commands/Derivative.adoc[Derivative],
+xref:/commands/Length.adoc[Length], xref:/commands/Curvature.adoc[Curvature],
+xref:/commands/CurvatureVector.adoc[CurvatureVector] and xref:/commands/OsculatingCircle.adoc[OsculatingCircle].
+
+[NOTE]
+====
+
+* Parametric curves can be used with pre-defined functions and arithmetic operations. For example, input `++c(3)++`
+returns the point at parameter position 3 on curve _c_.
+* You can also place a point on a curve using tool image:24px-Mode_point.svg.png[Mode point.svg,width=24,height=24]
+xref:/tools/Point.adoc[Point] or command xref:/commands/Point.adoc[Point]. Since the endpoints _a_ and _b_ are dynamic
+you can use slider variables as well (see tool image:24px-Mode_slider.svg.png[Mode slider.svg,width=24,height=24]
+xref:/tools/Slider.adoc[Slider]).
+
+====
+
+Creating a parametric curve through some given points is not possible. You can however try e.g.
+xref:/commands/FitPoly.adoc[FitPoly Command] to get a function going through these points.
+
+== Polar curves
+
+In order to draw a curve defined using polar coordinates, it is possible to use one of the following (equivalent)
+syntaxes:
+
+[EXAMPLE]
+====
+
+`++ρ=sin(2 θ)++`, or `++sin(2 θ)++`, or `++f(t)=(sin(2*t); t)++`, or `++(sin(2*t); t)++`, or
+`++f(t)=(sin(2*t); t), 0< t < pi++`, or `++(sin(2*t); t), 0 < t < pi++`, or `++Curve[(sin(2*t); t), t, 0, 2pi]++`.
+
+====
+
+== Implicit curves
+
+Implicit curves are polynomials in variables _x_ and _y_. The can be entered directly using the
+xref:/Input_Bar.adoc[Input Bar]. The xref:/commands/ImplicitCurve.adoc[ImplicitCurve] command generates an implicit
+curve through a list of points.
+
+[EXAMPLE]
+====
+
+`++x^4 + y^3 = 2xy++`
+
+====

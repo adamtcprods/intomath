@@ -1,0 +1,13 @@
+= Plane Tool
+:page-en: tools/Plane
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select three points (non-collinear), a point and line (the point must not be on the line), 
+two lines (either parallel or intersecting), or a polygon to create the plane containing the selected objects.
+
+[NOTE]
+====
+
+See also xref:/commands/Plane.adoc[Plane] command.
+
+====

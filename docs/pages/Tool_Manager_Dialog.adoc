@@ -1,0 +1,44 @@
+= Tool Manager Dialog
+:page-en: Tool_Manager_Dialog
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+[NOTE]
+====
+
+Tools management is fully functional only in Classic v.5.
+
+====
+
+In the 
+image:18px-Menu-tools.svg.png[Menu-tools.svg,width=18,height=18] xref:/Tools_Menu.adoc[Tools Menu], select
+image:18px-Menu-tools.svg.png[Menu-tools.svg,width=18,height=18] _Manage Tools_ to open a panel containing 
+the list of the custom tools currently available in the construction, editable info about their main properties 
+(related command name, help, and icon), and the following management options:
+
+* *Delete:* +
+ Select a tool from the list and press Delete to remove the selected tool from the construction.
+
+* *Open:* +
+ Select a tool from the list and press Open to open the tool in a separate GeoGebra window. The tool can be modified and saved such that changes are automatically applied to the construction.
+
+
+[NOTE]
+====
+
+After modifying the tool, select image:18px-Menu-tools-new.svg.png[Menu-tools-new.svg,width=18,height=18] _Create new tool_ 
+in image:18px-Menu-tools.svg.png[Menu-tools.svg,width=18,height=18] xref:/Tools_Menu.adoc[Tools Menu] to save it. 
+Keeping the same name results in overwriting the existing tool, while giving it a new name saves it as a new tool.
+To overwrite a tool that is already in use, the types of input and output objects must remain the same.
+
+====
+
+* *Save as… :* +
+Select a tool from the list and press Save as… to save the tool on the computer as a .ggt file. This file can be opened in other constructions.
+
+[NOTE]
+====
+
+Use the xref:/Toolbar.adoc[toolbar] customization options to add a loaded tool to the toolbar.
+
+====
+

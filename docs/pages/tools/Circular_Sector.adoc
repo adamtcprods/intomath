@@ -1,0 +1,19 @@
+= Circular Sector Tool
+:page-en: tools/Circular_Sector
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+
+Activate the tool, then select two existing points or click two distinct positions in the _Graphics View_ to create the center and the initial point of the circular sector, respectively.
+
+Drag to create the sector, drawn in counterclockwise direction.
+
+Select an existing point (or click in the _Graphics View_) to specify the length of the arc of the sector.
+
+
+[NOTE]
+====
+
+* The last selected point can also be a point outside the arc.
+* See also the xref:/commands/CircularSector.adoc[CircularSector] command.
+
+====

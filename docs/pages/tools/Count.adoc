@@ -1,0 +1,11 @@
+= Count Tool
+:page-en: tools/Count
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+This tool is available only in the image:16px-Menu_view_spreadsheet.svg.png[Menu view
+spreadsheet.svg,width=16,height=16] xref:/Spreadsheet_View.adoc[Spreadsheet View], and it can be used in two possible ways:
+
+* Select a destination cell, select the tool, then select a cell range. The count of the number of cells in the range containing data will be displayed in the destination cell.
+* Select a cell range containing more than one cell, then select the tool. 
+** If the range has multiple rows, the count of the number of cells in each column containing data will be displayed below each column. If you need to count the cells containing data in each row, hold [.kcode]#Shift# while selecting the tool: the count for each row will be displayed to the right of the selected data.
+** If the range has only one row, the count of the number of cells in the range containing data will be displayed in the first free cell to the right of the selected data.

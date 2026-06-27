@@ -1,0 +1,14 @@
+= Special Object Tools
+:page-en: tools/Special_Object_Tools
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Special object xref:/Tools.adoc[tools] are no longer a category of objects in GeoGebra Classic. However, these tools are still available even if distributed in different toolboxes.
+
+In previous versions the following tools were classified as _Special Object Tools_: 
+
+* xref:/tools/Function_Inspector.adoc[Function Inspector]
+* xref:/tools/Image.adoc[Image]
+* xref:/tools/Pen.adoc[Pen]
+* xref:/Probability_Calculator.adoc[Probability Calculator]
+* xref:/tools/Relation.adoc[Relation]
+* xref:/tools/Text.adoc[Text]

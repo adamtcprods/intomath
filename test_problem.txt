@@ -1,0 +1,5 @@
+Cho tam giác (ABC) ((AB < AC)) nội tiếp đường tròn ((O;R)) có đường kính (BC). Trên cung nhỏ (AC) lấy điểm (D). Đường thẳng (BD) cắt (AC) tại (E). Từ (E) kẻ (EF \perp BC) tại (F).
+
+a) Chứng minh tứ giác (BAEF) nội tiếp một đường tròn.
+b) Chứng minh (DB) là phân giác của góc (ADF).
+c) Gọi (M) là trung điểm của (EC). Chứng minh (DM \cdot CA = CF \cdot CO).

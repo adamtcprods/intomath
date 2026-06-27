@@ -1,0 +1,20 @@
+= Angle Tool
+:page-en: tools/Angle
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then create an angle as follows:
+
+* Select three existing points or click/tap three distinct positions in the _Graphics View_ to create the angle with vertex at the second point and sides defined by the other two points.
+* Select two segments to create the angle between them.
+* Select two lines to create the angle between them.
+* Select two vectors to create the angle between them.
+* Select a polygon to create all its interior angles.
+
+[NOTE]
+====
+
+* Angles are created with _counterclockwise_ orientation. Therefore, the selection order of objects is relevant for
+the _Angle_ tool. Use the drop-down list in the _Basic_ tab of the xref:/Properties_Dialog.adoc[Properties Dialog] of an angle to limit its size within given intervals.
+* See also the xref:/commands/Angle.adoc[Angle] command.
+
+====

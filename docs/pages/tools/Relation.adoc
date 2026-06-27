@@ -1,0 +1,11 @@
+= Relation Tool
+:page-en: tools/Relation
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Activate the tool, then select two objects to get information about their relation in a pop-up window.
+
+[NOTE]
+====
+See also the 
+xref:/commands/Relation.adoc[Relation] command.
+====

@@ -1,0 +1,42 @@
+= FitPoly Command
+:page-en: commands/FitPoly
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+FitPoly( <List of Points>, <Degree of Polynomial> )::
+  Calculates the polynomial regression model of given _degree_ that fits the specified _points_.
+
+[EXAMPLE]
+====
+
+`++FitPoly({(-1, -1), (0, 1), (1, 1), (2, 5)}, 3)++` yields _f(x) = x^3^ - 1 x^2^ + 1_.
+
+====
+
+FitPoly( <Freehand Function>, <Degree of Polynomial> )::
+  Calculates the polynomial regression model of given _degree_ that fits a function drawn using the
+  xref:/tools/Freehand_Shape.adoc[Freehand Shape Tool].
+
+[NOTE]
+====
+
+* To obtain a polynomial of degree _n_ the list must contain at least _n_ + 1 points.
+* See also xref:/commands/FitExp.adoc[FitExp Command], xref:/commands/FitLog.adoc[FitLog Command],
+xref:/commands/FitPow.adoc[FitPow Command] and xref:/commands/FitSin.adoc[FitSin Command].
+* When working with big/small numbers, consider normalizing them for a more accurate result. See
+xref:/commands/Normalize.adoc[Normalize Command].
+
+====
+
+== CAS Syntax
+
+FitPoly( <List of Points>, <Degree of Polynomial> )::
+  Calculates the polynomial regression model of given _degree_ that fits the specified _points_.
+
+[EXAMPLE]
+====
+
+`++FitPoly({(-1, -1), (0, 1), (1, 1), (2, 5)}, 3)++` yields _x^3^ - x^2^ + 1_.
+
+====
+
+

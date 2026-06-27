@@ -1,0 +1,23 @@
+= Freehand Shape Tool
+:page-en: tools/Freehand_Shape
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+(Only in _GeoGebra Classic_ and in the _Graphing Calculator_ and _Geometry_ apps)
+
+Activate the tool, then sketch the graph of a xref:/Functions.adoc[function] or draw a freehand conic, a segment or a polygon that will be recognized and converted to the corresponding exact shapes.
+
+
+[NOTE]
+====
+
+For functions created with this tool:
+
+* It is possible to evaluate the functions at a point.
+* It is possible to create points on them.
+* It is not possible to calculate their derivatives.
+* It is possible to apply all the curve fitting commands, e.g. xref:/commands/FitSin.adoc[FitSin_Command].
+* It is possible to apply the xref:/commands/Integral.adoc[Integral] command e.g. `++Integral(f, 1, 5)++` to shade and calculate areas defined by the functions.
+
+====
+
+

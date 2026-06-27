@@ -1,0 +1,15 @@
+= SetPointSize Command
+:page-en: commands/SetPointSize
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+SetPointSize( <Point>, <Number> )::
+  Changes the size of the given point to the given number.
+SetPointSize( <Object>, <Number> )::
+  Changes the size of the vertices of an object. The object can be any 2D or 3D one with vertices, e.g. a polygon, a polyhedron, a net...
+
+[NOTE]
+====
+
+The command is also applicable to lists of (unlabeled) points, e.g. if _++list={(1, 2), (3, 4)}++_, then `++SetPointSize(list,5)++` changes the size of the listed points.
+
+====

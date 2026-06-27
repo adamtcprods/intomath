@@ -1,0 +1,21 @@
+= Logistic Command
+:page-en: commands/Logistic
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+Logistic( <Mean>, <Scale>, <Variable Value> )::
+  Evaluates the cumulative distribution function of a https://en.wikipedia.org/wiki/Logistic_distribution[logistic distribution] at variable value _v_, i.e. calculates the
+  probability _P(X ≤ v)_ where _X_ is a random variable with a logistic distribution defined by the given parameters _mean_ and _scale_.
+
+[NOTE]
+====
+
+This syntax returns the probability at a given value, that is the area under the logistic distribution curve to the left of the given _x_-coordinate.
+====
+
+Logistic( <Mean>, <Scale>, <Variable Value>, <Boolean Cumulative> )::
+ If _Cumulative = true_, evaluates the cumulative distribution function of a logistic distribution with given _mean_ and _scale_ at the given _variable value_, otherwise it evaluates the probability density function of the distribution at _variable value_.
+
+Logistic( <Mean>, <Scale>, x, <Boolean Cumulative> )::
+ If _Cumulative = true_, creates the cumulative density function (cdf) of a logistic distribution with given _mean_ and _scale_, otherwise it creates the probability density function (pdf) of the distribution.
+
+

@@ -1,0 +1,12 @@
+= Transformation Commands
+:page-en: commands/Transformation_Commands
+ifdef::env-github[:imagesdir: /en/modules/ROOT/assets/images]
+
+* xref:/commands/Dilate.adoc[Dilate (Enlarge)]
+* xref:/commands/Reflect.adoc[Reflect]
+* xref:/commands/Rotate.adoc[Rotate]
+* xref:/commands/Shear.adoc[Shear]
+* xref:/commands/Stretch.adoc[Stretch]
+* xref:/commands/Translate.adoc[Translate]
+
+See also xref:/tools/Transformation_Tools.adoc[Transformation Tools]

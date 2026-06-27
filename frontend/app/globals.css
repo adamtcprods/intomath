@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 33% 99%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --primary: 229 84% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 20% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 20% 96%;
+  --muted-foreground: 215 16% 47%;
+  --accent: 216 34% 94%;
+  --accent-foreground: 222 47% 11%;
+  --border: 220 18% 90%;
+  --input: 220 18% 90%;
+  --ring: 229 84% 60%;
+  --success: 160 84% 33%;
+  --success-foreground: 0 0% 100%;
+}
+
+.dark {
+  --background: 222 47% 8%;
+  --foreground: 210 40% 98%;
+  --card: 223 38% 12%;
+  --card-foreground: 210 40% 98%;
+  --primary: 228 89% 67%;
+  --primary-foreground: 222 47% 11%;
+  --secondary: 223 28% 16%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 223 28% 16%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 223 28% 18%;
+  --accent-foreground: 210 40% 98%;
+  --border: 223 20% 23%;
+  --input: 223 20% 23%;
+  --ring: 228 89% 67%;
+  --success: 160 84% 42%;
+  --success-foreground: 222 47% 11%;
+}
+
+* {
+  @apply border-border;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-feature-settings: "ss01" 1, "cv01" 1;
+}
+
+a {
+  @apply text-inherit no-underline;
+}
+
+::selection {
+  @apply bg-primary/20;
+}
+
+.math-copy {
+  white-space: pre-wrap;
+}
+
+.panel-scroll {
+  scrollbar-width: thin;
+}
+
+.panel-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+}
