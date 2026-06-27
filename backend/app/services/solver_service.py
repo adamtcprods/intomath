@@ -31,14 +31,15 @@ from app.services.geometry_extractor import GeometryExtractor
 from app.services.local_solver_selector import (
     LOCAL_SOLVER_MIN_CONFIDENCE,
     UNSUPPORTED_LOCAL_SOLVER_MARKER,
-    LocalSolveResult,
     LocalSolverSelector,
 )
+from app.services.local_solver_types import LocalSolveResult
 from app.services.model_router import (
     JSON_FALLBACK_MODEL,
     JSON_SECONDARY_FALLBACK_MODEL,
     LOCAL_DETERMINISTIC_SOLVER_MODEL,
     LOCAL_HEURISTIC_PARSER_MODEL,
+    LOCAL_LLAMA_TRIVIA_MODEL,
     ModelRouter,
     RoutingDecision,
 )
@@ -309,22 +310,29 @@ class SolverService:
         *,
         original_text: str,
     ) -> RoutingDecision:
+        is_trivia = local_result.reason == "answered a math trivia or concept question"
+        solver_model = LOCAL_LLAMA_TRIVIA_MODEL if is_trivia else LOCAL_DETERMINISTIC_SOLVER_MODEL
+
         reason_parts = [
             routing.reason,
-            f"deterministic local solver used because it {local_result.reason}",
+            f"local llama.cpp trivia solver used because it {local_result.reason}"
+            if is_trivia
+            else f"deterministic local solver used because it {local_result.reason}",
         ]
         if local_result.detector_model:
             reason_parts.append(
-                f"local Ollama detector {local_result.detector_model} selected a supported canonical form"
+                f"local llama.cpp model {local_result.detector_model} produced the answer"
+                if is_trivia
+                else f"local llama.cpp detector {local_result.detector_model} selected a supported canonical form"
             )
-        if local_result.normalized_text.strip() != original_text.strip():
+        if not is_trivia and local_result.normalized_text.strip() != original_text.strip():
             reason_parts.append("prompt was normalized before deterministic solving")
 
         return RoutingDecision(
             problem_type=local_result.problem_type or routing.problem_type,
             difficulty=routing.difficulty,
             parser_model=LOCAL_HEURISTIC_PARSER_MODEL,
-            solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
+            solver_model=solver_model,
             vision_model=routing.vision_model,
             reason="; ".join(reason_parts),
         )

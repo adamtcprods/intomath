@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import get_settings
-from app.integrations.ollama_client import OllamaClient
+from app.integrations.llama_client import LlamaClient
 from app.schemas.common import Difficulty, ProblemType
-from app.schemas.solve import SolveAnswer, SolveStep
 from app.services.fallback_solver import FallbackSolver
+from app.services.local_solver_types import LocalSolveDetection, LocalSolveResult
+from app.services.llama_trivia_solver import (
+    LlamaTriviaSolver,
+    trivia_result_to_local_solve_result,
+)
 
 LOCAL_SOLVER_MIN_CONFIDENCE = 0.70
 UNSUPPORTED_LOCAL_SOLVER_MARKER = "outside the local deterministic solver"
@@ -19,12 +22,12 @@ Return exactly one JSON object and nothing else.
 
 The local solver can ONLY solve these prompt shapes:
 1. Arithmetic expressions written with digits and operators, e.g. "12*(3+4)-5".
-2. One-variable linear equations in x with numeric coefficients, parentheses, multiplication, or division, e.g. "2(x + 3) = 14" or "x/2 + 3 = 7".
+2. One-variable linear equations or inequalities in x with numeric coefficients, parentheses, multiplication, or division, e.g. "2(x + 3) = 14" or "x/2 + 3 < 7".
 3. Quadratic graph analysis for y=... or f(x)=..., e.g. "y = x^2 - 4x + 3".
 4. Simple constructions: perpendicular bisector of AB, circle with center O and radius r, or construct/draw triangle ABC.
 
 If the problem can be normalized into one of those exact shapes, set use_local_solver=true and put that canonical text in normalized_prompt.
-If it needs proof, calculus, trigonometry, statistics, word-problem reasoning, systems, inequalities, factoring beyond graph analysis, geometry theorem reasoning, or you are unsure, set use_local_solver=false.
+If it needs proof, calculus, trigonometry, statistics, word-problem reasoning, systems, factoring beyond graph analysis, geometry theorem reasoning, or you are unsure, set use_local_solver=false.
 Do not solve the problem. Do not include the answer.
 
 JSON schema:
@@ -32,42 +35,30 @@ JSON schema:
 """.strip()
 
 
-@dataclass(frozen=True)
-class LocalSolveResult:
-    answer: SolveAnswer
-    steps: list[SolveStep]
-    confidence: float
-    warnings: list[str]
-    normalized_text: str
-    problem_type: ProblemType | None
-    reason: str
-    detector_model: str | None = None
-
-
-@dataclass(frozen=True)
-class LocalSolveDetection:
-    use_local_solver: bool
-    normalized_prompt: str | None
-    reason: str | None
-
 
 class LocalSolverSelector:
     """Selects deterministic solving when it can be trusted.
 
-    The deterministic fallback solver is always the final gate. Ollama may suggest
+    The deterministic fallback solver is always the final gate. llama.cpp may suggest
     that a prompt can be normalized into a supported shape, but we only use that
     route if the deterministic solver then returns a high-confidence result.
+
+    If both deterministic solving and llama.cpp normalization fail, and the question
+    looks like math trivia or a concept question, the llama.cpp trivia solver is
+    attempted as a zero-cost local alternative before falling through to the cloud.
     """
 
     def __init__(
         self,
         fallback_solver: FallbackSolver | None = None,
-        ollama_client: OllamaClient | None = None,
+        llama_client: LlamaClient | None = None,
         settings: Any | None = None,
+        trivia_solver: LlamaTriviaSolver | None = None,
     ) -> None:
         self.fallback_solver = fallback_solver or FallbackSolver()
-        self.ollama_client = ollama_client or OllamaClient()
+        self.llama_client = llama_client or LlamaClient()
         self.settings = settings or get_settings()
+        self.trivia_solver = trivia_solver or LlamaTriviaSolver(self.llama_client)
 
     async def solve_if_supported(
         self,
@@ -78,6 +69,7 @@ class LocalSolverSelector:
         if not self.settings.local_solver_first:
             return None
 
+        # 1. Try the fast, fully deterministic solver first.
         direct_result = self._solve_with_deterministic_solver(
             text=text,
             problem_type=problem_type,
@@ -87,25 +79,35 @@ class LocalSolverSelector:
         if direct_result is not None:
             return direct_result
 
-        if not self._should_use_ollama_detector(text):
-            return None
+        # 2. Ask Llama-server to normalise the prompt into a canonical supported form,
+        #    then re-run the deterministic solver on the normalised text.
+        if self._should_use_llama_detector(text):
+            detection = await self._detect_with_llama(text)
+            if detection is not None and detection.use_local_solver:
+                normalized_prompt = (detection.normalized_prompt or "").strip()
+                if normalized_prompt:
+                    reason = detection.reason or "Llama detector normalized the prompt"
+                    normalised_result = self._solve_with_deterministic_solver(
+                        text=normalized_prompt,
+                        problem_type=problem_type,
+                        difficulty=difficulty,
+                        reason=reason,
+                        detector_model=getattr(self.llama_client, "model", None),
+                    )
+                    if normalised_result is not None:
+                        return normalised_result
 
-        detection = await self._detect_with_ollama(text)
-        if detection is None or not detection.use_local_solver:
-            return None
+        # 3. Fall back to the llama.cpp trivia solver for concept / trivia questions.
+        if getattr(self.settings, "local_solver_llama_trivia_enabled", False):
+            trivia_result = await self.trivia_solver.solve(text, problem_type, difficulty)
+            if trivia_result is not None:
+                return trivia_result_to_local_solve_result(
+                    trivia_result,
+                    problem_type=problem_type,
+                    original_text=text,
+                )
 
-        normalized_prompt = (detection.normalized_prompt or "").strip()
-        if not normalized_prompt:
-            return None
-
-        reason = detection.reason or "Ollama detector normalized the prompt"
-        return self._solve_with_deterministic_solver(
-            text=normalized_prompt,
-            problem_type=problem_type,
-            difficulty=difficulty,
-            reason=reason,
-            detector_model=getattr(self.ollama_client, "model", None),
-        )
+        return None
 
     def _solve_with_deterministic_solver(
         self,
@@ -142,10 +144,10 @@ class LocalSolverSelector:
             UNSUPPORTED_LOCAL_SOLVER_MARKER in warning for warning in warnings
         )
 
-    def _should_use_ollama_detector(self, text: str) -> bool:
-        if not self.settings.local_solver_ollama_detection_enabled:
+    def _should_use_llama_detector(self, text: str) -> bool:
+        if not self.settings.local_solver_llama_detection_enabled:
             return False
-        if not getattr(self.ollama_client, "enabled", False):
+        if not getattr(self.llama_client, "enabled", False):
             return False
 
         lowered = text.lower().strip()
@@ -184,6 +186,8 @@ class LocalSolverSelector:
 
         operator_markers = {
             "=",
+            "<",
+            ">",
             "+",
             "-",
             "*",
@@ -195,6 +199,8 @@ class LocalSolverSelector:
             "times",
             "divided",
             "equals",
+            "less",
+            "greater",
         }
         solver_intent_markers = {
             "solve",
@@ -223,10 +229,10 @@ class LocalSolverSelector:
             or any(marker in lowered for marker in construction_markers)
         )
 
-    async def _detect_with_ollama(self, text: str) -> LocalSolveDetection | None:
+    async def _detect_with_llama(self, text: str) -> LocalSolveDetection | None:
         prompt = f"{LOCAL_SOLVER_DETECTION_PROMPT}\n\nProblem:\n{text}"
         try:
-            payload = await self.ollama_client.generate_json(prompt=prompt)
+            payload = await self.llama_client.generate_json(prompt=prompt)
         except Exception:
             return None
 

@@ -21,10 +21,11 @@ class Settings(BaseSettings):
     openrouter_site_url: str = "http://localhost:3000"
     deepseek_ocr_model_id: str = "deepseek-ai/deepseek-ocr-2"
     local_solver_first: bool = True
-    local_solver_ollama_detection_enabled: bool = True
-    local_solver_ollama_base_url: str = "http://localhost:11434"
-    local_solver_ollama_model: str = "hf.co/unsloth/gemma-3-270m-it-qat-GGUF:Q4_K_XL"
-    local_solver_ollama_timeout_seconds: float = 4.0
+    local_solver_llama_detection_enabled: bool = True
+    local_solver_llama_trivia_enabled: bool = True
+    local_solver_llama_base_url: str = "http://localhost:8080"
+    local_solver_llama_model: str = "hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL"
+    local_solver_llama_timeout_seconds: float = 4.0
     database_url: str = "sqlite:///./intomath.db"
     cors_origins: str = Field(default="http://localhost:3000")
 

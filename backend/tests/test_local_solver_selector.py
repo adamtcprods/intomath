@@ -7,10 +7,10 @@ from app.services.local_solver_selector import LocalSolverSelector
 
 class LocalSolverSettings:
     local_solver_first = True
-    local_solver_ollama_detection_enabled = True
+    local_solver_llama_detection_enabled = True
 
 
-class FakeOllamaClient:
+class FakeLlamaClient:
     enabled = True
     model = "local:test-detector"
 
@@ -25,9 +25,9 @@ class FakeOllamaClient:
         return self.payload
 
 
-def test_selector_uses_deterministic_solver_before_ollama() -> None:
-    ollama = FakeOllamaClient()
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), ollama_client=ollama)  # type: ignore[arg-type]
+def test_selector_uses_deterministic_solver_before_llama() -> None:
+    llama = FakeLlamaClient()
+    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
         selector.solve_if_supported(
@@ -41,18 +41,18 @@ def test_selector_uses_deterministic_solver_before_ollama() -> None:
     assert result.answer.latex == "x = 6"
     assert result.problem_type is ProblemType.algebra
     assert result.detector_model is None
-    assert ollama.calls == 0
+    assert llama.calls == 0
 
 
-def test_selector_accepts_ollama_normalized_supported_prompt() -> None:
-    ollama = FakeOllamaClient(
+def test_selector_accepts_llama_normalized_supported_prompt() -> None:
+    llama = FakeLlamaClient(
         {
             "use_local_solver": True,
             "normalized_prompt": "x + 5 = 17",
             "reason": "normalized worded linear equation",
         }
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), ollama_client=ollama)  # type: ignore[arg-type]
+    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
         selector.solve_if_supported(
@@ -66,18 +66,18 @@ def test_selector_accepts_ollama_normalized_supported_prompt() -> None:
     assert result.answer.latex == "x = 12"
     assert result.normalized_text == "x + 5 = 17"
     assert result.detector_model == "local:test-detector"
-    assert "strict routing classifier" in ollama.last_prompt
+    assert "strict routing classifier" in llama.last_prompt
 
 
-def test_selector_accepts_ollama_normalized_parenthesized_equation() -> None:
-    ollama = FakeOllamaClient(
+def test_selector_accepts_llama_normalized_parenthesized_equation() -> None:
+    llama = FakeLlamaClient(
         {
             "use_local_solver": True,
             "normalized_prompt": "2(x + 3) = 14",
             "reason": "normalized worded parenthesized equation",
         }
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), ollama_client=ollama)  # type: ignore[arg-type]
+    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
         selector.solve_if_supported(
@@ -91,18 +91,18 @@ def test_selector_accepts_ollama_normalized_parenthesized_equation() -> None:
     assert result.answer.latex == "x = 4"
     assert result.normalized_text == "2(x + 3) = 14"
     assert result.detector_model == "local:test-detector"
-    assert "parentheses" in ollama.last_prompt
+    assert "parentheses" in llama.last_prompt
 
 
-def test_selector_rejects_ollama_hint_if_deterministic_solver_cannot_solve_it() -> None:
-    ollama = FakeOllamaClient(
+def test_selector_rejects_llama_hint_if_deterministic_solver_cannot_solve_it() -> None:
+    llama = FakeLlamaClient(
         {
             "use_local_solver": True,
             "normalized_prompt": "prove the triangle statement",
             "reason": "bad hint",
         }
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), ollama_client=ollama)  # type: ignore[arg-type]
+    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
         selector.solve_if_supported(
@@ -113,4 +113,4 @@ def test_selector_rejects_ollama_hint_if_deterministic_solver_cannot_solve_it() 
     )
 
     assert result is None
-    assert ollama.calls == 1
+    assert llama.calls == 1

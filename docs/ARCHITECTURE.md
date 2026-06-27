@@ -92,7 +92,7 @@ flowchart TD
 - `model_router.py`
   - configurable routing heuristics
 - `local_solver_selector.py`
-  - tries deterministic solving first and optionally uses a tiny local Ollama model to normalize supported prompts
+  - tries deterministic solving first and optionally uses a tiny local llama.cpp model to normalize supported prompts
 - `ocr_service.py`
   - image-to-structured-text stage through OpenRouter vision
 - `geometry_extractor.py`
@@ -131,7 +131,7 @@ Difficulty is then assessed separately:
 | Use case | Model / route |
 |---|---|
 | Supported arithmetic, linear equations, quadratic graphs, simple constructions | `local:deterministic-solver` |
-| Optional local-solver detection / normalization | `hf.co/unsloth/gemma-3-270m-it-qat-GGUF:Q4_K_XL` via Ollama |
+| Optional local-solver detection / normalization | `hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL` (reasoning enabled) via Llama-server |
 | Easy algebra / arithmetic outside deterministic coverage | `nvidia/nemotron-3-nano-30b-a3b:free` via OpenRouter |
 | Hard geometry / proofs / multi-step reasoning | `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |
