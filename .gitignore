@@ -21,3 +21,4 @@ frontend/.env.local
 Thumbs.db
 token.txt
 test_problem.txt
+intomath.db
