@@ -1,7 +1,8 @@
 # Python
 backend/.venv/
-backend/__pycache__/
-backend/.pytest_cache/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
 backend/*.db
 backend/*.sqlite3
 
@@ -19,6 +20,8 @@ frontend/.env.local
 # OS
 .DS_Store
 Thumbs.db
+
+# Project files
 token.txt
 test_problem.txt
 intomath.db
