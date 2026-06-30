@@ -60,36 +60,6 @@ The solve experience is built around two focused areas:
 - **Input:** prompt, optional image attachment, and examples
 - **Result:** answer, steps, backend notes, and visualization when available
 
-## Repository structure
-
-```text
-intomath/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── db/
-│   │   ├── integrations/
-│   │   ├── schemas/
-│   │   └── services/
-│   ├── tests/
-│   ├── pyproject.toml
-│   └── requirements.txt
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── API.md
-│   └── SETUP.md
-└── frontend/
-    ├── app/
-    ├── components/
-    ├── features/
-    ├── lib/
-    ├── stores/
-    ├── bun.lock
-    ├── package.json
-    └── tsconfig.json
-```
-
 ## Core backend architecture
 
 ### 1. Structured solving
@@ -122,7 +92,7 @@ The routing layer lives in `backend/app/services/model_router.py`.
 Current models and local routes:
 - **Deterministic local solving first:** `local:deterministic-solver`
 - **Heuristic local visualization parsing for local solves:** `local:heuristic-parser`
-- **Optional tiny local detector via llama-server:** `hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL` (enable reasoning)
+- **Optional tiny local detector via llama-server:** `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF` (enable reasoning)
 - **Easy / lower-latency solving via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`
 - **Hard / proof-heavy solving via OpenRouter:** `nvidia/nemotron-3-super-120b-a12b:free`
 - **JSON fallback routing via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`, then `openrouter/free`
@@ -225,7 +195,7 @@ Backend default URL: `http://localhost:8000`
 - `LOCAL_SOLVER_FIRST` — defaults to `true`; tries deterministic solving before model-backed solving
 - `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; asks local llama-server to detect/normalize supported local-solver prompts when direct deterministic matching fails
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
-- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL`
+- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF`
 - `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `4.0`
 
 ## Validation

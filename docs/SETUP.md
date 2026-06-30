@@ -67,7 +67,7 @@ CORS_ORIGINS=http://localhost:3000
 LOCAL_SOLVER_FIRST=true
 LOCAL_SOLVER_LLAMA_DETECTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
-LOCAL_SOLVER_LLAMA_MODEL=hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL
+LOCAL_SOLVER_LLAMA_MODEL=hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF
 LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=4.0
 ```
 
@@ -91,7 +91,7 @@ IntoMath expects the following model policy:
 For stronger local-first routing, run a tiny Llama-server detector locally:
 
 ```bash
-./llama-server -m hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL --chat-template-kwargs '{"enable_thinking":true}'
+./llama-server -m hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF --chat-template-kwargs '{"enable_thinking":true}'
 ```
 
 The detector only decides whether a prompt can be normalized into a deterministic-solver shape; the deterministic solver still produces the answer and rejects unsupported hints.
