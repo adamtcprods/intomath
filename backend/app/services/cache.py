@@ -14,8 +14,9 @@ class CacheEntry(Generic[T]):
 
 
 class TTLCache(Generic[T]):
-    def __init__(self, ttl_seconds: int = 600) -> None:
+    def __init__(self, ttl_seconds: int = 600, max_size: int = 1000) -> None:
         self.ttl_seconds = ttl_seconds
+        self.max_size = max_size
         self._store: dict[str, CacheEntry[T]] = {}
 
     def get(self, key: str) -> T | None:
@@ -28,6 +29,18 @@ class TTLCache(Generic[T]):
         return entry.value
 
     def set(self, key: str, value: T) -> None:
+        # Evict oldest entry when at capacity (excluding the key being set)
+        if key not in self._store and len(self._store) >= self.max_size:
+            oldest_key = min(self._store, key=lambda k: self._store[k].expires_at)
+            self._store.pop(oldest_key, None)
         self._store[key] = CacheEntry(
             value=value, expires_at=time.time() + self.ttl_seconds
         )
+
+    def delete(self, key: str) -> None:
+        """Remove a single entry immediately, regardless of TTL."""
+        self._store.pop(key, None)
+
+    def clear(self) -> None:
+        """Remove all entries from the cache."""
+        self._store.clear()

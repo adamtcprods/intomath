@@ -210,4 +210,60 @@ def test_fallback_solver_rejects_invalid_math_syntax_fast() -> None:
     assert confidence == 0.35
 
 
+def test_fallback_solver_handles_linear_function_graph() -> None:
+    answer, steps, confidence, warnings = FallbackSolver().solve(
+        "Graph y = 2x + 4",
+        ProblemType.functions,
+        Difficulty.easy,
+    )
+    assert confidence == 0.90
+    assert "slope m = 2" in answer.text
+    assert "y-intercept at (0, 4)" in answer.text
+    assert "x-intercept is at (-2, 0)" in answer.text
+    assert answer.latex == "y = 2x + 4"
+    assert len(steps) == 3
+    assert steps[0].title == "Identify the graph type"
+    assert steps[1].title == "Find the y-intercept"
+    assert steps[2].title == "Find the x-intercept"
+
+    # Test negative coefficients and intercepts
+    answer_neg, steps_neg, confidence_neg, warnings_neg = FallbackSolver().solve(
+        "Graph y = -0.5x - 2",
+        ProblemType.functions,
+        Difficulty.easy,
+    )
+    assert confidence_neg == 0.90
+    assert "slope m = -0.5" in answer_neg.text
+    assert "y-intercept at (0, -2)" in answer_neg.text
+    assert "x-intercept is at (-4, 0)" in answer_neg.text
+    assert answer_neg.latex == "y = -0.5x - 2"
+
+
+def test_fallback_solver_handles_math_constants() -> None:
+    # Test simple pi arithmetic
+    answer, steps, confidence, warnings = FallbackSolver().solve(
+        "Calculate 2 * pi",
+        ProblemType.arithmetic,
+        Difficulty.easy,
+    )
+    assert confidence == 0.95
+    assert "6.283185" in answer.text
+
+    # Test unicode pi with implicit multiplication
+    answer_unicode, _, _, _ = FallbackSolver().solve(
+        "Calculate 2π",
+        ProblemType.arithmetic,
+        Difficulty.easy,
+    )
+    assert "6.283185" in answer_unicode.text
+
+    # Test e constant
+    answer_e, _, _, _ = FallbackSolver().solve(
+        "Calculate e^2",
+        ProblemType.arithmetic,
+        Difficulty.easy,
+    )
+    assert "7.389056" in answer_e.text
+
+
 
