@@ -1,8 +1,12 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.geometry_dsl import GeometryDSL
+
+_SUPPORTED_IMAGE_MIME_TYPES = frozenset(
+    ["image/jpeg", "image/png", "image/webp", "image/gif"]
+)
 
 
 def strip_latex_wrappers(value: str) -> str:
@@ -30,6 +34,22 @@ class ProblemInput(BaseModel):
     image_base64: str | None = None
     image_mime_type: str | None = None
     language: str = "auto"
+
+    @model_validator(mode="after")
+    def validate_input(self) -> "ProblemInput":
+        has_text = bool(self.text.strip())
+        has_image = bool(self.image_base64)
+        if not has_text and not has_image:
+            raise ValueError(
+                "At least one of 'text' or 'image_base64' must be provided."
+            )
+        if has_image and self.image_mime_type is not None:
+            if self.image_mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+                raise ValueError(
+                    f"Unsupported image_mime_type '{self.image_mime_type}'. "
+                    f"Must be one of: {sorted(_SUPPORTED_IMAGE_MIME_TYPES)}."
+                )
+        return self
 
 
 class SolveOptions(BaseModel):

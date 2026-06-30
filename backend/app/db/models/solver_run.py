@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.db.base import Base
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -13,7 +13,7 @@ class SolverRun(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     attempt_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("problem_attempts.id"), nullable=False
+        String(36), ForeignKey("problem_attempts.id"), nullable=False, index=True
     )
     parser_model: Mapped[str] = mapped_column(String(128), nullable=False)
     solver_model: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -25,5 +25,9 @@ class SolverRun(Base):
     cached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (
+        Index("ix_solver_runs_created_at", "created_at"),
     )

@@ -842,6 +842,7 @@ class SolverService:
     def _build_cache_key(self, normalized_text: str, request: SolveRequest) -> str:
         payload = {
             "text": normalized_text,
+            "language": request.input.language,
             "options": request.options.model_dump(mode="json"),
         }
         return hashlib.sha256(

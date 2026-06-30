@@ -32,6 +32,13 @@ class LinearExpression:
 
 
 @dataclass(frozen=True)
+class LinearFunction:
+    expression: str
+    m: float
+    c: float
+
+
+@dataclass(frozen=True)
 class QuadraticFunction:
     expression: str
     a: float
@@ -57,6 +64,10 @@ class FallbackSolver:
         linear = self._try_linear_equation(text)
         if linear is not None:
             return (*self._build_linear_response(linear), 0.92, warnings)
+
+        linear_graph = self._try_linear_graph(text)
+        if linear_graph is not None:
+            return (*self._build_linear_graph_response(linear_graph), 0.90, warnings)
 
         quadratic = self._try_quadratic_graph(text)
         if quadratic is not None:
@@ -303,6 +314,77 @@ class FallbackSolver:
         )
         return answer, steps
 
+    def _try_linear_graph(self, text: str) -> LinearFunction | None:
+        expression = self._extract_function_expression(text)
+        if not expression:
+            return None
+        coefficients = self._parse_quadratic_coefficients(expression)
+        if coefficients is None:
+            return None
+        a, b, c = coefficients
+        if not math.isclose(a, 0.0):
+            return None
+        if math.isclose(b, 0.0):
+            return None
+        return LinearFunction(expression=expression, m=b, c=c)
+
+    def _build_linear_graph_response(
+        self, linear: LinearFunction
+    ) -> tuple[SolveAnswer, list[SolveStep]]:
+        m, c = linear.m, linear.c
+        m_text = self._format_number(m)
+        c_text = self._format_number(c)
+        x_intercept = -c / m
+        x_intercept_text = self._format_number(x_intercept)
+        
+        latex_formula = f"y = {m_text}x"
+        if not math.isclose(c, 0.0):
+            if c > 0:
+                latex_formula += f" + {c_text}"
+            else:
+                latex_formula += f" - {self._format_number(abs(c))}"
+
+        answer = SolveAnswer(
+            text=f"The graph of y = {linear.expression} is a straight line with slope m = {m_text} and y-intercept at (0, {c_text}). The x-intercept is at ({x_intercept_text}, 0).",
+            latex=latex_formula
+        )
+        
+        steps = [
+            SolveStep(
+                index=1,
+                title="Identify the graph type",
+                explanation=f"The function y = {linear.expression} is linear (of the form y = mx + c), so its graph is a straight line.",
+                why_it_happens="A first-degree polynomial creates a straight line with a constant slope.",
+                common_mistakes=["Assuming the graph is a parabola because of other quadratic equations."],
+                hints=["Check the degree of the variable x."],
+            ),
+            SolveStep(
+                index=2,
+                title="Find the y-intercept",
+                explanation="Substitute x = 0 into the function to find where the line crosses the y-axis.",
+                why_it_happens="The y-intercept occurs where the x-coordinate is exactly zero.",
+                latex=[
+                    f"y = {m_text}(0) + {c_text} = {c_text}"
+                ],
+                hints=["The constant term c is always the y-intercept value."],
+            ),
+            SolveStep(
+                index=3,
+                title="Find the x-intercept",
+                explanation="Substitute y = 0 into the function and solve for x to find where the line crosses the x-axis.",
+                why_it_happens="The x-intercept occurs where the y-coordinate is exactly zero.",
+                latex=[
+                    f"0 = {m_text}x + {c_text}",
+                    f"{m_text}x = {self._format_number(-c)}",
+                    f"x = {x_intercept_text}"
+                ],
+                common_mistakes=["Dividing the coefficient by the constant instead of vice versa.", "Forgetting to change the sign of the constant term when moving it."],
+                hints=["Solve the basic equation 0 = mx + c for x."],
+                exam_tip="Always express intercepts as ordered coordinate pairs: (x, 0) and (0, y).",
+            )
+        ]
+        return answer, steps
+
     def _try_quadratic_graph(self, text: str) -> QuadraticFunction | None:
         expression = self._extract_function_expression(text)
         if not expression:
@@ -543,7 +625,7 @@ class FallbackSolver:
         raw_candidates = cast(
             list[str],
             re.findall(
-                r"[0-9xX+\-*/^().\s]+(?:<=|>=|<=|>=|<|>|=)[0-9xX+\-*/^().\s]+",
+                r"[0-9xX+\-*/^().\s]+(?:<=|>=|<|>|=)[0-9xX+\-*/^().\s]+",
                 normalized,
             ),
         )
@@ -693,13 +775,20 @@ class FallbackSolver:
             return None
 
     def _normalize_math_expression(self, text: str) -> str:
-        return (
-            text.replace("−", "-")
+        normalized = (
+            text.replace("π", "pi")
+            .replace("−", "-")
             .replace("–", "-")
             .replace("—", "-")
             .replace("×", "*")
             .replace("²", "^2")
         )
+        # Handle implicit multiplication for pi and e (e.g., 2pi -> 2 * pi)
+        normalized = re.sub(r"(?<=[0-9.)xX])\s*(?=pi\b|\be\b)", " * ", normalized)
+        # Replace standalone constants with numeric values
+        normalized = re.sub(r"\bpi\b", "3.141592653589793", normalized)
+        normalized = re.sub(r"\be\b", "2.718281828459045", normalized)
+        return normalized
 
     def _prepare_math_ast_expression(self, text: str) -> str:
         normalized = self._normalize_math_expression(text)
