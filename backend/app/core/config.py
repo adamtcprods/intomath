@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     local_solver_llama_detection_enabled: bool = True
     local_solver_llama_trivia_enabled: bool = True
     local_solver_llama_base_url: str = "http://localhost:8080"
-    local_solver_llama_model: str = "hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL"
+    local_solver_llama_model: str = "hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF"
     local_solver_llama_timeout_seconds: float = 4.0
     database_url: str = "sqlite:///./intomath.db"
     cors_origins: str = Field(default="http://localhost:3000")

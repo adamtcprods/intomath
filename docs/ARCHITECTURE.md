@@ -131,7 +131,7 @@ Difficulty is then assessed separately:
 | Use case | Model / route |
 |---|---|
 | Supported arithmetic, linear equations, quadratic graphs, simple constructions | `local:deterministic-solver` |
-| Optional local-solver detection / normalization | `hf.co/unsloth/Qwen3.5-2B-GGUF:Q4_K_XL` (reasoning enabled) via Llama-server |
+| Optional local-solver detection / normalization | `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF` (reasoning enabled) via Llama-server |
 | Easy algebra / arithmetic outside deterministic coverage | `nvidia/nemotron-3-nano-30b-a3b:free` via OpenRouter |
 | Hard geometry / proofs / multi-step reasoning | `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |

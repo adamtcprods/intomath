@@ -3,12 +3,6 @@
 Handles math trivia and conceptual questions that the deterministic solver
 cannot answer but that are too simple to warrant a cloud LLM call.
 
-Examples:
-- "Is 97 prime?"
-- "What is the GCD of 15 and 25?"
-- "What is a rational number?"
-- "List the properties of a parallelogram."
-
 This solver is always a best-effort layer. Any timeout, malformed response,
 or low confidence causes it to return None, letting the caller fall through
 to the cloud model pipeline.
