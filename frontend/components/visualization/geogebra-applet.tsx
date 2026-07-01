@@ -357,14 +357,14 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
           )}
         </div>
         {appletCommands.length > 0 ? (
-          <div className="rounded-2xl border border-border/70 bg-background p-4">
-            <p className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-              GeoGebra commands
-            </p>
-            <pre className="overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
+          <details className="rounded-2xl border border-border/70 bg-background p-4 text-sm">
+            <summary className="cursor-pointer font-medium text-muted-foreground transition-colors hover:text-foreground">
+              View construction details
+            </summary>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
               {commandString}
             </pre>
-          </div>
+          </details>
         ) : null}
       </CardContent>
     </Card>

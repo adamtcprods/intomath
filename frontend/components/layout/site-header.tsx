@@ -14,7 +14,7 @@ export function SiteHeader() {
           </div>
           <div>
             <p className="text-sm font-semibold tracking-tight">IntoMath</p>
-            <p className="text-xs text-muted-foreground">See the math</p>
+            <p className="text-xs text-muted-foreground">Clear math steps</p>
           </div>
         </Link>
 

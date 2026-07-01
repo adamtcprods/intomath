@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { cn, formatConfidence, titleCase } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 const examples = [
   "Solve 2x + 5 = 17 and explain each step.",
@@ -141,10 +141,10 @@ export function SolveWorkspace() {
       <section className="space-y-4">
         <Card className="border-border/70">
           <CardHeader>
-            <CardTitle>Problem</CardTitle>
+            <CardTitle>What do you want to solve?</CardTitle>
             <CardDescription>
-              Plain typed math works best. Image OCR requires a configured model
-              backend.
+              Type a problem or attach a photo. Clear, specific questions work
+              best.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -173,7 +173,7 @@ export function SolveWorkspace() {
             <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
               <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground hover:border-primary/40 hover:bg-primary/5">
                 <ImagePlus className="h-4 w-4 text-primary" />
-                <span>{imageBase64 ? "Image attached" : "Attach image"}</span>
+                <span>{imageBase64 ? "Photo attached" : "Add a photo"}</span>
                 <Input
                   accept="image/*"
                   className="hidden"
@@ -209,7 +209,11 @@ export function SolveWorkspace() {
 
             {solveMutation.error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
-                {solveMutation.error.message}
+                <p className="font-medium">We couldn&apos;t solve that yet.</p>
+                <p className="mt-1">
+                  Try rewording the problem, checking your connection, or using
+                  a clearer image.
+                </p>
               </div>
             ) : null}
           </CardContent>
@@ -232,14 +236,6 @@ export function SolveWorkspace() {
                       ) : null}
                     </div>
                     <CardTitle className="mt-3">Answer</CardTitle>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">
-                      {titleCase(result.problem_type)}
-                    </Badge>
-                    <Badge variant="outline">
-                      Confidence {formatConfidence(result.confidence)}
-                    </Badge>
                   </div>
                 </div>
               </CardHeader>
@@ -419,7 +415,7 @@ export function SolveWorkspace() {
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
                 <p className="mb-2 flex items-center gap-2 font-medium">
                   <AlertTriangle className="h-4 w-4" />
-                  Backend notes
+                  Notes
                 </p>
                 <ul className="space-y-1">
                   {result.warnings.map((warning) => (
@@ -437,9 +433,8 @@ export function SolveWorkspace() {
                 Your answer will appear here
               </h2>
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                Start with a clear typed problem. If the backend can generate a
-                graph or construction, it will appear in the visualization
-                panel.
+                Start with a clear problem. If a graph or construction would
+                help, it will appear alongside the solution.
               </p>
             </CardContent>
           </Card>

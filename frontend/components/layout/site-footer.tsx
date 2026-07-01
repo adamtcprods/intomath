@@ -7,8 +7,8 @@ export function SiteFooter() {
         <div className="space-y-3">
           <p className="text-base font-semibold text-foreground">IntoMath</p>
           <p>
-            A focused math solver with structured steps and interactive visuals
-            when the backend can generate them.
+            A focused math solver for clear answers, guided steps, and helpful
+            visuals.
           </p>
         </div>
         <div>
