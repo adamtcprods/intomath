@@ -10,9 +10,9 @@ import { AppProviders } from "@/components/providers/app-providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "IntoMath 2.0",
+  title: "IntoMath",
   description:
-    "Understand mathematics visually with interactive explanations, diagrams, and AI-guided learning.",
+    "A focused math solver with clear steps, answers, and helpful visuals.",
 };
 
 export default function RootLayout({
