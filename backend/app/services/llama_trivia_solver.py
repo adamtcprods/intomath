@@ -21,31 +21,6 @@ from app.services.local_solver_types import LocalSolveResult
 
 LLAMA_TRIVIA_MIN_CONFIDENCE = 0.60
 
-# Topic categories explicitly outside the trivia solver's scope.
-_SKIP_MARKERS: frozenset[str] = frozenset(
-    {
-        # Proofs
-        "prove",
-        "proof",
-        "show that",
-        "justify",
-        "chứng minh",
-        "chung minh",
-        # Advanced maths that need symbolic computation
-        "derivative",
-        "differentiate",
-        "integral",
-        "integrate",
-        "laplace",
-        "fourier",
-        # Things the deterministic solver handles — avoid double-dipping
-        "solve for x",
-        "find x",
-        "y =",
-        "f(x) =",
-    }
-)
-
 LLAMA_TRIVIA_PROMPT = """You are a concise math tutor. Answer the math question below.
 Return exactly one JSON object and nothing else.
 
@@ -118,7 +93,7 @@ class LlamaTriviaSolver:
         if not getattr(self.llama_client, "enabled", False):
             return None
 
-        if self._should_skip(text):
+        if self._should_skip(text, problem_type, difficulty):
             return None
 
         prompt = f"{LLAMA_TRIVIA_PROMPT}\n{text}"
@@ -131,11 +106,31 @@ class LlamaTriviaSolver:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _should_skip(self, text: str) -> bool:
-        lowered = text.lower().strip()
-        if len(lowered) < 4:
+    def _should_skip(
+        self, text: str, problem_type: ProblemType, difficulty: Difficulty
+    ) -> bool:
+        stripped = text.strip()
+        if len(stripped) < 4:
             return True
-        return any(marker in lowered for marker in _SKIP_MARKERS)
+        if difficulty is Difficulty.hard:
+            return True
+        if problem_type in {
+            ProblemType.geometry,
+            ProblemType.calculus,
+            ProblemType.statistics,
+            ProblemType.probability,
+            ProblemType.trigonometry,
+        }:
+            return True
+        return self._looks_like_computational_prompt(stripped)
+
+    def _looks_like_computational_prompt(self, text: str) -> bool:
+        return bool(
+            re.search(r"(?:^|[^A-Za-z])(?:y|f\s*\(\s*x\s*\))\s*=", text, re.IGNORECASE)
+            or re.search(r"[A-Za-z][A-Za-z0-9_]*.*(?:<=|>=|=|<|>)", text)
+            or re.search(r"\b[a-zA-Z]\b\s*[-+*/^]", text)
+            or re.search(r"[-+*/^]\s*\b[a-zA-Z]\b", text)
+        )
 
     def _parse_payload(self, payload: dict[str, Any]) -> LlamaTriviaSolveResult | None:
         try:

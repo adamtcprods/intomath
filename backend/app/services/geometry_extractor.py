@@ -24,8 +24,6 @@ class GeometryExtractor:
     ) -> GeometryExtractionResult:
         if problem_type not in {
             ProblemType.geometry,
-            ProblemType.coordinate_geometry,
-            ProblemType.functions,
             ProblemType.algebra,
         }:
             return GeometryExtractionResult(
@@ -35,7 +33,7 @@ class GeometryExtractor:
         if (
             self.client.enabled
             and not parser_model.startswith("local:")
-            and problem_type in {ProblemType.geometry, ProblemType.coordinate_geometry}
+            and problem_type is ProblemType.geometry
         ):
             try:
                 return await self._extract_with_llm(text, parser_model)
@@ -152,9 +150,7 @@ class GeometryExtractor:
         has_circle = any(
             action.action is GeometryActionType.CREATE_CIRCLE for action in actions
         )
-        if not has_circle and any(
-            phrase in lowered for phrase in ["đường tròn", "duong tron", "circle"]
-        ):
+        if not has_circle:
             center_match = re.search(
                 r"(?:\(\(?\s*([A-Z])\s*[;,.]\s*R\s*\)?\)?|center\s+([A-Z]))",
                 text,
@@ -237,21 +233,31 @@ class GeometryExtractor:
                 )
                 summary = summary or "Perpendicular bisector construction"
 
-        if not actions and problem_type in {
-            ProblemType.geometry,
-            ProblemType.coordinate_geometry,
-        }:
+        if not actions and problem_type is ProblemType.geometry:
             warnings.append(
                 "No deterministic geometry pattern was recognized, so no visualization was generated."
             )
 
-        if not actions and problem_type is ProblemType.functions:
+        if (
+            not actions
+            and problem_type is ProblemType.algebra
+            and self._looks_graphable(text)
+        ):
             warnings.append("No graphable expression was detected in the prompt.")
 
         return GeometryExtractionResult(
             dsl=GeometryDSL(actions=actions),
             summary=summary,
             warnings=warnings,
+        )
+
+    def _looks_graphable(self, text: str) -> bool:
+        return bool(
+            re.search(
+                r"(?:y|f\s*\(\s*x\s*\))\s*=\s*[0-9xX+\-*/^²().\s]+",
+                text,
+                flags=re.IGNORECASE,
+            )
         )
 
     def _clean_equation(self, expression: str) -> str:
