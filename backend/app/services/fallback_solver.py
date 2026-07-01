@@ -267,7 +267,9 @@ class FallbackSolver:
         net_a_text = self._format_number(linear.net_a)
         net_c_text = self._format_number(linear.net_c)
         solution_text = self._format_number(linear.solution)
-        collected_latex = f"{self._format_linear_term(linear.net_a)} {linear.op} {net_c_text}"
+        collected_latex = (
+            f"{self._format_linear_term(linear.net_a)} {linear.op} {net_c_text}"
+        )
 
         flip_notice = ""
         if linear.op != "=" and linear.net_a < 0:
@@ -279,13 +281,16 @@ class FallbackSolver:
                 title="Collect like terms",
                 explanation=(
                     "Move all x-terms to the left and constants to the right. "
-                    f"The inequality becomes {collected_latex}." if linear.op != "=" else
-                    f"The equation becomes {collected_latex}."
+                    f"The inequality becomes {collected_latex}."
+                    if linear.op != "="
+                    else f"The equation becomes {collected_latex}."
                 ),
                 why_it_happens="Equivalent operations preserve the relation while simplifying the expression.",
                 common_mistakes=[
                     "Changing the sign incorrectly when moving a term across the comparison operator."
-                ] if linear.op != "=" else [
+                ]
+                if linear.op != "="
+                else [
                     "Changing the sign incorrectly when moving a term across the equals sign."
                 ],
                 hints=["Keep x-terms and number terms in separate columns."],
@@ -298,19 +303,26 @@ class FallbackSolver:
                 why_it_happens="Division by the coefficient reverses the multiplication attached to x.",
                 common_mistakes=[
                     "Dividing only one side.",
-                    "Forgetting to flip the inequality sign when dividing by a negative number."
-                ] if linear.op != "=" else ["Dividing only one side of the equation."],
+                    "Forgetting to flip the inequality sign when dividing by a negative number.",
+                ]
+                if linear.op != "="
+                else ["Dividing only one side of the equation."],
                 hints=[
                     "Substitute a test value back into the original inequality to check the solution range."
-                ] if linear.op != "=" else [
+                ]
+                if linear.op != "="
+                else [
                     "Substitute the value back into the original equation to check it."
                 ],
-                exam_tip="Always remember to flip the inequality direction when multiplying or dividing by a negative number." if linear.op != "=" else "A quick substitution check catches most sign errors.",
+                exam_tip="Always remember to flip the inequality direction when multiplying or dividing by a negative number."
+                if linear.op != "="
+                else "A quick substitution check catches most sign errors.",
                 latex=[f"x {linear.solution_op} {solution_text}"],
             ),
         ]
         answer = SolveAnswer(
-            text=f"The solution is x {linear.solution_op} {solution_text}.", latex=f"x {linear.solution_op} {solution_text}"
+            text=f"The solution is x {linear.solution_op} {solution_text}.",
+            latex=f"x {linear.solution_op} {solution_text}",
         )
         return answer, steps
 
@@ -336,7 +348,7 @@ class FallbackSolver:
         c_text = self._format_number(c)
         x_intercept = -c / m
         x_intercept_text = self._format_number(x_intercept)
-        
+
         latex_formula = f"y = {m_text}x"
         if not math.isclose(c, 0.0):
             if c > 0:
@@ -346,16 +358,18 @@ class FallbackSolver:
 
         answer = SolveAnswer(
             text=f"The graph of y = {linear.expression} is a straight line with slope m = {m_text} and y-intercept at (0, {c_text}). The x-intercept is at ({x_intercept_text}, 0).",
-            latex=latex_formula
+            latex=latex_formula,
         )
-        
+
         steps = [
             SolveStep(
                 index=1,
                 title="Identify the graph type",
                 explanation=f"The function y = {linear.expression} is linear (of the form y = mx + c), so its graph is a straight line.",
                 why_it_happens="A first-degree polynomial creates a straight line with a constant slope.",
-                common_mistakes=["Assuming the graph is a parabola because of other quadratic equations."],
+                common_mistakes=[
+                    "Assuming the graph is a parabola because of other quadratic equations."
+                ],
                 hints=["Check the degree of the variable x."],
             ),
             SolveStep(
@@ -363,9 +377,7 @@ class FallbackSolver:
                 title="Find the y-intercept",
                 explanation="Substitute x = 0 into the function to find where the line crosses the y-axis.",
                 why_it_happens="The y-intercept occurs where the x-coordinate is exactly zero.",
-                latex=[
-                    f"y = {m_text}(0) + {c_text} = {c_text}"
-                ],
+                latex=[f"y = {m_text}(0) + {c_text} = {c_text}"],
                 hints=["The constant term c is always the y-intercept value."],
             ),
             SolveStep(
@@ -376,12 +388,15 @@ class FallbackSolver:
                 latex=[
                     f"0 = {m_text}x + {c_text}",
                     f"{m_text}x = {self._format_number(-c)}",
-                    f"x = {x_intercept_text}"
+                    f"x = {x_intercept_text}",
                 ],
-                common_mistakes=["Dividing the coefficient by the constant instead of vice versa.", "Forgetting to change the sign of the constant term when moving it."],
+                common_mistakes=[
+                    "Dividing the coefficient by the constant instead of vice versa.",
+                    "Forgetting to change the sign of the constant term when moving it.",
+                ],
                 hints=["Solve the basic equation 0 = mx + c for x."],
                 exam_tip="Always express intercepts as ordered coordinate pairs: (x, 0) and (0, y).",
-            )
+            ),
         ]
         return answer, steps
 
@@ -880,8 +895,12 @@ class FallbackSolver:
             left = self._quadratic_from_ast(node.left, depth + 1)
             right = self._quadratic_from_ast(node.right, depth + 1)
             if (
-                abs(left.a) > 1e50 or abs(left.b) > 1e50 or abs(left.c) > 1e50 or
-                abs(right.a) > 1e50 or abs(right.b) > 1e50 or abs(right.c) > 1e50
+                abs(left.a) > 1e50
+                or abs(left.b) > 1e50
+                or abs(left.c) > 1e50
+                or abs(right.a) > 1e50
+                or abs(right.b) > 1e50
+                or abs(right.c) > 1e50
             ):
                 raise ValueError("Operand too large")
 
@@ -923,9 +942,11 @@ class FallbackSolver:
                 elif exp_int == 2:
                     if not math.isclose(left.a, 0.0):
                         raise ValueError("Squaring a quadratic exceeds degree 2")
-                    a = left.b ** 2
+                    a = left.b**2
                     b = 2 * left.b * left.c
-                    c = left.c ** 2
+                    c = left.c**2
+                else:
+                    raise ValueError("Unsupported exponent for quadratic")
             else:
                 raise ValueError("Unsupported operation")
 

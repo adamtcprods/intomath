@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from app.core.config import get_settings
 from app.integrations.llama_client import LlamaClient
 from app.schemas.common import Difficulty, ProblemType
 from app.services.fallback_solver import FallbackSolver
-from app.services.local_solver_types import LocalSolveDetection, LocalSolveResult
 from app.services.llama_trivia_solver import (
     LlamaTriviaSolver,
     trivia_result_to_local_solve_result,
 )
+from app.services.local_solver_types import LocalSolveDetection, LocalSolveResult
 
 LOCAL_SOLVER_MIN_CONFIDENCE = 0.70
 UNSUPPORTED_LOCAL_SOLVER_MARKER = "outside the local deterministic solver"
@@ -33,7 +32,6 @@ Do not solve the problem. Do not include the answer.
 JSON schema:
 {"use_local_solver": true, "normalized_prompt": "canonical supported prompt", "reason": "short reason"}
 """.strip()
-
 
 
 class LocalSolverSelector:
@@ -99,7 +97,9 @@ class LocalSolverSelector:
 
         # 3. Fall back to the llama.cpp trivia solver for concept / trivia questions.
         if getattr(self.settings, "local_solver_llama_trivia_enabled", False):
-            trivia_result = await self.trivia_solver.solve(text, problem_type, difficulty)
+            trivia_result = await self.trivia_solver.solve(
+                text, problem_type, difficulty
+            )
             if trivia_result is not None:
                 return trivia_result_to_local_solve_result(
                     trivia_result,
@@ -150,84 +150,8 @@ class LocalSolverSelector:
         if not getattr(self.llama_client, "enabled", False):
             return False
 
-        lowered = text.lower().strip()
-        if len(lowered) < 3:
-            return False
-        if any(
-            proof_marker in lowered
-            for proof_marker in {
-                "prove",
-                "proof",
-                "show that",
-                "justify",
-                "chứng minh",
-                "chung minh",
-            }
-        ):
-            return False
-        if any(
-            advanced_marker in lowered
-            for advanced_marker in {
-                "derivative",
-                "differentiate",
-                "integral",
-                "integrate",
-                "limit",
-                "sin",
-                "cos",
-                "tan",
-                "mean",
-                "median",
-                "variance",
-                "probability",
-            }
-        ):
-            return False
-
-        operator_markers = {
-            "=",
-            "<",
-            ">",
-            "+",
-            "-",
-            "*",
-            "/",
-            "^",
-            "²",
-            "plus",
-            "minus",
-            "times",
-            "divided",
-            "equals",
-            "less",
-            "greater",
-        }
-        solver_intent_markers = {
-            "solve",
-            "evaluate",
-            "simplify",
-            "calculate",
-            "what is",
-        }
-        graph_markers = {"graph", "function", "parabola", "vertex"}
-        construction_markers = {
-            "circle",
-            "triangle",
-            "perpendicular",
-            "bisector",
-            "midpoint",
-            "construct",
-            "draw",
-        }
-        has_operator = any(marker in lowered for marker in operator_markers)
-        has_solver_intent = any(marker in lowered for marker in solver_intent_markers)
-        has_digit_or_variable = bool(re.search(r"\d|\bx\b", lowered))
-
-        return (
-            (has_operator and (has_solver_intent or has_digit_or_variable))
-            or any(marker in lowered for marker in graph_markers)
-            or any(marker in lowered for marker in construction_markers)
-        )
+        stripped = text.strip()
+        return 3 <= len(stripped) <= 1_000
 
     async def _detect_with_llama(self, text: str) -> LocalSolveDetection | None:
         prompt = f"{LOCAL_SOLVER_DETECTION_PROMPT}\n\nProblem:\n{text}"
@@ -247,8 +171,10 @@ class LocalSolverSelector:
     def _infer_supported_problem_type(self, text: str) -> ProblemType | None:
         if self.fallback_solver._try_linear_equation(text) is not None:
             return ProblemType.algebra
+        if self.fallback_solver._try_linear_graph(text) is not None:
+            return ProblemType.algebra
         if self.fallback_solver._try_quadratic_graph(text) is not None:
-            return ProblemType.functions
+            return ProblemType.algebra
         if self.fallback_solver._try_geometry_construction(text) is not None:
             return ProblemType.geometry
         if self.fallback_solver._try_arithmetic(text) is not None:

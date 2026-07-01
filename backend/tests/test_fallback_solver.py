@@ -90,7 +90,9 @@ def test_fallback_solver_limits_recursive_depth_in_arithmetic() -> None:
         Difficulty.easy,
     )
     assert confidence == 0.35
-    assert any("outside the local deterministic solver" in warning for warning in warnings)
+    assert any(
+        "outside the local deterministic solver" in warning for warning in warnings
+    )
 
 
 def test_fallback_solver_prevents_exponent_overflow() -> None:
@@ -102,7 +104,9 @@ def test_fallback_solver_prevents_exponent_overflow() -> None:
         Difficulty.easy,
     )
     assert confidence == 0.35
-    assert any("outside the local deterministic solver" in warning for warning in warnings)
+    assert any(
+        "outside the local deterministic solver" in warning for warning in warnings
+    )
 
 
 def test_fallback_solver_limits_value_magnitude() -> None:
@@ -114,7 +118,9 @@ def test_fallback_solver_limits_value_magnitude() -> None:
         Difficulty.easy,
     )
     assert confidence == 0.35
-    assert any("outside the local deterministic solver" in warning for warning in warnings)
+    assert any(
+        "outside the local deterministic solver" in warning for warning in warnings
+    )
 
 
 def test_fallback_solver_limits_linear_recursion_depth() -> None:
@@ -126,7 +132,9 @@ def test_fallback_solver_limits_linear_recursion_depth() -> None:
         Difficulty.easy,
     )
     assert confidence == 0.35
-    assert any("outside the local deterministic solver" in warning for warning in warnings)
+    assert any(
+        "outside the local deterministic solver" in warning for warning in warnings
+    )
 
 
 def test_fallback_solver_handles_basic_inequality() -> None:
@@ -173,7 +181,7 @@ def test_fallback_solver_flips_inequality_on_negative_division_equal_op() -> Non
 def test_fallback_solver_handles_factored_quadratic() -> None:
     answer, steps, confidence, warnings = FallbackSolver().solve(
         "Graph y = (x - 1)*(x - 2)",
-        ProblemType.functions,
+        ProblemType.algebra,
         Difficulty.easy,
     )
     assert confidence == 0.86
@@ -184,7 +192,7 @@ def test_fallback_solver_handles_factored_quadratic() -> None:
 def test_fallback_solver_handles_fractional_quadratic() -> None:
     answer, steps, confidence, warnings = FallbackSolver().solve(
         "Graph y = x^2 / 2 - 2",
-        ProblemType.functions,
+        ProblemType.algebra,
         Difficulty.easy,
     )
     assert confidence == 0.86
@@ -213,7 +221,7 @@ def test_fallback_solver_rejects_invalid_math_syntax_fast() -> None:
 def test_fallback_solver_handles_linear_function_graph() -> None:
     answer, steps, confidence, warnings = FallbackSolver().solve(
         "Graph y = 2x + 4",
-        ProblemType.functions,
+        ProblemType.algebra,
         Difficulty.easy,
     )
     assert confidence == 0.90
@@ -229,7 +237,7 @@ def test_fallback_solver_handles_linear_function_graph() -> None:
     # Test negative coefficients and intercepts
     answer_neg, steps_neg, confidence_neg, warnings_neg = FallbackSolver().solve(
         "Graph y = -0.5x - 2",
-        ProblemType.functions,
+        ProblemType.algebra,
         Difficulty.easy,
     )
     assert confidence_neg == 0.90
@@ -264,6 +272,3 @@ def test_fallback_solver_handles_math_constants() -> None:
         Difficulty.easy,
     )
     assert "7.389056" in answer_e.text
-
-
-

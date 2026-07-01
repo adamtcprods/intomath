@@ -179,7 +179,7 @@ class SolverService:
                 )
 
         detected_subquestions = self._detect_subquestions(normalized_text)
-        routing = self.router.route(
+        routing = await self.router.route_async(
             normalized_text, has_image=bool(request.input.image_base64)
         )
         cache_key = self._build_cache_key(normalized_text, request)
@@ -261,7 +261,6 @@ class SolverService:
                     "graph"
                     if routing.problem_type
                     in {
-                        ProblemType.functions,
                         ProblemType.algebra,
                         ProblemType.calculus,
                     }
@@ -311,7 +310,9 @@ class SolverService:
         original_text: str,
     ) -> RoutingDecision:
         is_trivia = local_result.reason == "answered a math trivia or concept question"
-        solver_model = LOCAL_LLAMA_TRIVIA_MODEL if is_trivia else LOCAL_DETERMINISTIC_SOLVER_MODEL
+        solver_model = (
+            LOCAL_LLAMA_TRIVIA_MODEL if is_trivia else LOCAL_DETERMINISTIC_SOLVER_MODEL
+        )
 
         reason_parts = [
             routing.reason,
@@ -325,7 +326,10 @@ class SolverService:
                 if is_trivia
                 else f"local llama.cpp detector {local_result.detector_model} selected a supported canonical form"
             )
-        if not is_trivia and local_result.normalized_text.strip() != original_text.strip():
+        if (
+            not is_trivia
+            and local_result.normalized_text.strip() != original_text.strip()
+        ):
             reason_parts.append("prompt was normalized before deterministic solving")
 
         return RoutingDecision(
