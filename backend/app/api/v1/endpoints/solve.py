@@ -17,9 +17,23 @@ async def solve_problem(
     request: SolveRequest, db: Session = Depends(get_db)
 ) -> SolveResponse:
     """Solve a math problem and return a structured step-by-step response."""
+    input_type = "image" if request.input.image_base64 else "text"
+    logger.info(
+        "Solve endpoint received request input_type=%s text_chars=%s include_visualization=%s",
+        input_type,
+        len(request.input.text.strip()),
+        request.options.include_visualization,
+    )
     try:
         service = SolverService(db)
-        return await service.solve(request)
+        response = await service.solve(request)
+        logger.info(
+            "Solve endpoint completed request_id=%s status=%s cached=%s",
+            response.request_id,
+            response.status,
+            response.cached,
+        )
+        return response
     except Exception as exc:
         logger.exception("Unexpected error in solve endpoint")
         raise HTTPException(

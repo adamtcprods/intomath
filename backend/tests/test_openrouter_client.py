@@ -97,6 +97,19 @@ def test_openrouter_api_error_is_reported_without_choices_key() -> None:
         client._raise_response_error(data, model="test-model")
 
 
+def test_invalid_json_does_not_log_or_raise_response_content(caplog: pytest.LogCaptureFixture) -> None:
+    client = OpenRouterClient()
+    sensitive_marker = "PRIVATE_STUDENT_PROBLEM_123"
+
+    with caplog.at_level("WARNING"), pytest.raises(RuntimeError) as exc_info:
+        client._loads_json_response(
+            f"not-json {sensitive_marker}", model="test-model"
+        )
+
+    assert sensitive_marker not in str(exc_info.value)
+    assert all(sensitive_marker not in record.getMessage() for record in caplog.records)
+
+
 def test_missing_responses_output_reports_shape_instead_of_choices_key() -> None:
     client = OpenRouterClient()
     data = {"status": "failed", "incomplete_details": {"reason": "max_output_tokens"}}

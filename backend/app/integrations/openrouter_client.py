@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 
 import httpx
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class OpenRouterClient:
@@ -31,6 +34,12 @@ class OpenRouterClient:
         if not self.enabled:
             raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
+        logger.info(
+            "OpenRouter JSON completion started model=%s schema_name=%s has_json_schema=%s",
+            model,
+            schema_name,
+            json_schema is not None,
+        )
         data = await self._post_json_chat_with_fallbacks(
             model=model,
             system_prompt=system_prompt,
@@ -43,11 +52,20 @@ class OpenRouterClient:
         )
 
         text = self._extract_response_text(data, model=model)
+        logger.info(
+            "OpenRouter JSON completion returned text model=%s chars=%s",
+            model,
+            len(text),
+        )
         try:
             return self._loads_json_response(text, model=model)
         except RuntimeError as exc:
             if not self._is_invalid_json_error(exc):
                 raise
+            logger.warning(
+                "OpenRouter JSON completion returned invalid JSON; attempting repair model=%s",
+                model,
+            )
             return await self._repair_invalid_json_response(
                 model=model,
                 system_prompt=system_prompt,
@@ -55,7 +73,6 @@ class OpenRouterClient:
                 invalid_response=text,
                 json_schema=json_schema,
                 schema_name=schema_name,
-                original_error=exc,
             )
 
     async def vision_extract(
@@ -69,6 +86,12 @@ class OpenRouterClient:
         if not self.enabled:
             raise RuntimeError("OPENROUTER_API_KEY is not configured.")
 
+        logger.info(
+            "OpenRouter vision extraction started model=%s mime_type=%s image_chars=%s",
+            model,
+            mime_type,
+            len(image_base64),
+        )
         payload = {
             "model": model,
             "temperature": 0.1,
@@ -93,6 +116,11 @@ class OpenRouterClient:
 
         data = await self._post_responses(payload, model=model, timeout_seconds=90.0)
         text = self._extract_response_text(data, model=model)
+        logger.info(
+            "OpenRouter vision extraction returned text model=%s chars=%s",
+            model,
+            len(text),
+        )
         return self._loads_json_response(text, model=model)
 
     async def _post_json_chat_with_fallbacks(
@@ -123,6 +151,10 @@ class OpenRouterClient:
             )
         except RuntimeError as exc:
             if self._is_optional_json_control_unsupported_error(exc):
+                logger.warning(
+                    "OpenRouter optional JSON controls unsupported; retrying with reduced controls model=%s",
+                    model,
+                )
                 include_reasoning_controls, enable_response_healing = (
                     self._supported_optional_json_controls_after_error(exc)
                 )
@@ -143,6 +175,10 @@ class OpenRouterClient:
                     )
                 except RuntimeError as retry_exc:
                     if self._is_optional_json_control_unsupported_error(retry_exc):
+                        logger.warning(
+                            "OpenRouter optional JSON controls still unsupported; retrying with controls disabled model=%s",
+                            model,
+                        )
                         payload = self._chat_json_payload(
                             model=model,
                             system_prompt=system_prompt,
@@ -167,6 +203,10 @@ class OpenRouterClient:
                     exc = retry_exc
             if json_schema is None or not self._is_schema_unsupported_error(exc):
                 raise
+            logger.warning(
+                "OpenRouter JSON schema response_format unsupported; retrying with json_object model=%s",
+                model,
+            )
             payload = self._chat_json_payload(
                 model=model,
                 system_prompt=system_prompt,
@@ -202,6 +242,12 @@ class OpenRouterClient:
         model: str,
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        logger.info(
+            "OpenRouter request started path=%s model=%s timeout_seconds=%.1f",
+            path,
+            model,
+            timeout_seconds,
+        )
         timeout = httpx.Timeout(
             timeout_seconds,
             connect=10.0,
@@ -220,6 +266,12 @@ class OpenRouterClient:
                     timeout=timeout_seconds + 5.0,
                 )
             except (TimeoutError, httpx.TimeoutException) as exc:
+                logger.warning(
+                    "OpenRouter request timed out path=%s model=%s timeout_seconds=%.1f",
+                    path,
+                    model,
+                    timeout_seconds,
+                )
                 raise RuntimeError(
                     f"OpenRouter request timed out for model {model}."
                 ) from exc
@@ -227,17 +279,37 @@ class OpenRouterClient:
         try:
             data = response.json()
         except json.JSONDecodeError as exc:
+            logger.warning(
+                "OpenRouter returned non-JSON HTTP response path=%s model=%s status=%s response_chars=%s",
+                path,
+                model,
+                response.status_code,
+                len(response.text),
+            )
             raise RuntimeError(
-                f"OpenRouter returned non-JSON response for model {model}: "
-                f"HTTP {response.status_code} {response.text[:500]}"
+                f"OpenRouter returned a non-JSON HTTP {response.status_code} response "
+                f"for model {model}."
             ) from exc
 
         if response.status_code >= 400:
+            logger.warning(
+                "OpenRouter request failed path=%s model=%s status=%s error_type=%s",
+                path,
+                model,
+                response.status_code,
+                data.get("error_type") or type(data.get("error")).__name__,
+            )
             raise RuntimeError(
                 f"OpenRouter request failed for model {model}: "
                 f"HTTP {response.status_code} {self._format_api_error(data)}"
             )
         self._raise_response_error(data, model=model)
+        logger.info(
+            "OpenRouter request completed path=%s model=%s status=%s",
+            path,
+            model,
+            response.status_code,
+        )
         return data
 
     def _headers(self) -> dict[str, str]:
@@ -304,7 +376,6 @@ class OpenRouterClient:
         invalid_response: str,
         json_schema: dict[str, Any] | None,
         schema_name: str,
-        original_error: RuntimeError,
     ) -> dict[str, Any]:
         repair_prompt = (
             "The previous assistant response was invalid JSON. Convert the work into the "
@@ -315,6 +386,12 @@ class OpenRouterClient:
             "Invalid previous response:\n"
             f"{invalid_response[:4000]}\n\n"
             "Return only one valid JSON object. The first character must be { and the last must be }."
+        )
+        logger.info(
+            "OpenRouter JSON repair started model=%s schema_name=%s invalid_response_chars=%s",
+            model,
+            schema_name,
+            len(invalid_response),
         )
         data = await self._post_json_chat_with_fallbacks(
             model=model,
@@ -328,10 +405,18 @@ class OpenRouterClient:
         )
         text = self._extract_response_text(data, model=model)
         try:
-            return self._loads_json_response(text, model=model)
+            repaired = self._loads_json_response(text, model=model)
+            logger.info("OpenRouter JSON repair succeeded model=%s", model)
+            return repaired
         except RuntimeError as repair_error:
+            logger.warning(
+                "OpenRouter JSON repair failed model=%s error_type=%s",
+                model,
+                type(repair_error).__name__,
+            )
             raise RuntimeError(
-                f"{original_error}; JSON repair attempt failed: {repair_error}"
+                f"OpenRouter returned invalid JSON for model {model}; "
+                "the JSON repair attempt also failed."
             ) from repair_error
 
     def _json_only_system_prompt(self, system_prompt: str) -> str:
@@ -448,12 +533,23 @@ class OpenRouterClient:
         try:
             parsed = json.loads(stripped)
         except json.JSONDecodeError as exc:
-            preview = stripped[:500].replace("\n", " ")
+            logger.warning(
+                "OpenRouter returned invalid JSON model=%s line=%s column=%s response_chars=%s",
+                model,
+                exc.lineno,
+                exc.colno,
+                len(stripped),
+            )
             raise RuntimeError(
-                f"OpenRouter returned invalid JSON for model {model}: {exc}. "
-                f"Response preview: {preview}"
+                f"OpenRouter returned invalid JSON for model {model} "
+                f"at line {exc.lineno}, column {exc.colno}."
             ) from exc
         if not isinstance(parsed, dict):
+            logger.warning(
+                "OpenRouter returned non-object JSON model=%s json_type=%s",
+                model,
+                type(parsed).__name__,
+            )
             raise RuntimeError(
                 f"OpenRouter returned JSON {type(parsed).__name__} for model {model}; expected object."
             )
@@ -463,6 +559,11 @@ class OpenRouterClient:
         error = data.get("error")
         if error in (None, {}):
             return
+        logger.warning(
+            "OpenRouter response contained error model=%s error_type=%s",
+            model,
+            data.get("error_type") or type(error).__name__,
+        )
         raise RuntimeError(
             f"OpenRouter returned an error for model {model}: {self._format_api_error(data)}"
         )

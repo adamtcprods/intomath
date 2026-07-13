@@ -1,3 +1,5 @@
+import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -13,6 +15,12 @@ from app.db.models.visualization_artifact import VisualizationArtifact  # noqa: 
 from app.db.session import engine
 
 settings = get_settings()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
 
 
 @asynccontextmanager

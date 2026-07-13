@@ -110,11 +110,14 @@ class FallbackSolver:
                 warnings,
             )
 
-        warnings.append(
-            "This prompt is outside the local deterministic solver. Configure OPENROUTER_API_KEY for full model-backed solving and OCR."
+        warnings.extend(
+            [
+                "This prompt is outside the local deterministic solver.",
+                "Configure OPENROUTER_API_KEY for full model-backed solving and OCR.",
+            ]
         )
         answer = SolveAnswer(
-            text="I could not produce a complete solution with the local solver for this prompt. Try a typed arithmetic expression, a linear equation like 2(x + 3) = 14 or x/2 + 3 = 7, a quadratic graph like y = x^2 - 4x + 3, or configure the model backend for broader coverage.",
+            text="I could not produce a complete solution with the local solver for this prompt. Try a typed arithmetic expression, a linear equation like 2(x + 3) = 14 or x/2 + 3 = 7, a quadratic graph like y = x^2 - 4x + 3, or use the model solver for broader coverage.",
             latex=None,
         )
         steps = [
@@ -122,7 +125,7 @@ class FallbackSolver:
                 index=1,
                 title="Use a supported local pattern or enable the model backend",
                 explanation="The request was received and classified, but it did not match one of the deterministic local solving patterns.",
-                why_it_happens="Without an OpenRouter API key, IntoMath avoids inventing an answer for unsupported prompts.",
+                why_it_happens="IntoMath avoids inventing an answer when no available solver can handle the requested problem reliably.",
                 common_mistakes=[
                     "Trusting a guessed answer when the solver has not matched a known pattern."
                 ],

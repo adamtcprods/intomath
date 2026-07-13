@@ -45,8 +45,7 @@ export function LandingPage() {
         <section className="border-b border-border/70 bg-grid-fade">
           <div className="mx-auto grid max-w-7xl gap-10 px-6 py-20 lg:grid-cols-[1fr_0.85fr] lg:px-8 lg:py-24">
             <div className="max-w-3xl">
-              <Badge>IntoMath</Badge>
-              <h1 className="mt-5 text-5xl font-semibold tracking-tight text-foreground sm:text-6xl">
+              <h1 className="text-5xl font-semibold tracking-tight text-foreground sm:text-6xl">
                 Solve math with clear steps.
               </h1>
               <p className="mt-6 text-lg leading-8 text-muted-foreground">
@@ -80,16 +79,21 @@ export function LandingPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm leading-7 text-muted-foreground">
                 {examplePrompts.map((prompt) => (
-                  <div
-                    className="rounded-2xl border border-border/70 bg-background p-4 text-foreground/90"
+                  <Link
+                    className="group flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-background p-4 text-foreground/90 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    href={{
+                      pathname: "/dashboard/solve",
+                      query: { prompt },
+                    }}
                     key={prompt}
                   >
-                    {prompt}
-                  </div>
+                    <span>{prompt}</span>
+                    <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-1" />
+                  </Link>
                 ))}
                 <p>
-                  Type your own problem or attach an image in the solver. Clear,
-                  specific questions produce the best explanations.
+                  Choose an example, type your own problem, or attach an image
+                  in the solver.
                 </p>
               </CardContent>
             </Card>
@@ -98,8 +102,7 @@ export function LandingPage() {
 
         <section className="mx-auto max-w-7xl px-6 py-16 lg:px-8" id="features">
           <div className="max-w-2xl">
-            <Badge variant="secondary">Why it feels simple</Badge>
-            <h2 className="mt-4 text-3xl font-semibold tracking-tight">
+            <h2 className="text-3xl font-semibold tracking-tight">
               Everything points back to the solution
             </h2>
           </div>

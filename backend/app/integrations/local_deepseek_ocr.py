@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import binascii
+import importlib
+import importlib.util
 import io
 import logging
 import os
@@ -53,20 +57,34 @@ class LocalDeepSeekOCR:
             RuntimeError: If required dependencies are missing.
             ValueError: If the image cannot be decoded or OCR output is missing.
         """
-        try:
-            import anyio
-        except ImportError as exc:
-            raise RuntimeError(
-                "Local DeepSeek OCR requires anyio. Install with: pip install anyio"
-            ) from exc
-
-        image_bytes = base64.b64decode(image_base64)
+        image_bytes = _decode_base64_payload(image_base64)
         image_path = _write_temp_image(image_bytes, mime_type)
         prompt = PROMPT_MARKDOWN if as_markdown else PROMPT_FREE_OCR
 
-        return await anyio.to_thread.run_sync(
-            lambda: self._extract_text_sync(image_path, prompt)
+        worker = asyncio.create_task(
+            asyncio.to_thread(self._extract_text_sync, image_path, prompt)
         )
+        cancelled = False
+        try:
+            while not worker.done():
+                try:
+                    _ = await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    if worker.cancelled():
+                        raise
+                    # asyncio cannot stop a running worker thread. Delay parent
+                    # cancellation until inference releases the image it is reading.
+                    cancelled = True
+                except Exception:
+                    break
+
+            if cancelled:
+                if not worker.cancelled():
+                    _ = worker.exception()  # consume a failure after parent cancellation
+                raise asyncio.CancelledError
+            return worker.result()
+        finally:
+            _safe_unlink(image_path)
 
     def _extract_text_sync(self, image_path: str, prompt: str) -> str:
         model, tokenizer = _load_model(self.model_id)
@@ -75,7 +93,7 @@ class LocalDeepSeekOCR:
         # only documented usage). We provide a temp directory and read the
         # result file back ourselves rather than assuming a return value.
         with tempfile.TemporaryDirectory() as output_dir:
-            model.infer(
+            result = model.infer(
                 tokenizer,
                 prompt=prompt,
                 image_file=image_path,
@@ -85,29 +103,49 @@ class LocalDeepSeekOCR:
                 crop_mode=True,
                 save_results=True,
             )
+            if isinstance(result, str) and result.strip():
+                return result.strip()
             return _read_ocr_output(output_dir, image_path)
 
 
+def _decode_base64_payload(image_base64: str) -> bytes:
+    """Decode raw base64 or a data URL payload into bytes."""
+    payload = image_base64.strip()
+    if payload.lower().startswith("data:") and "," in payload:
+        payload = payload.split(",", 1)[1]
+    payload = "".join(payload.split())
+
+    try:
+        return base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Invalid base64 image data.") from exc
+
+
 def _read_ocr_output(output_dir: str, image_path: str) -> str:
-    """Read the text file that model.infer() writes to output_dir.
-
-    The model writes a .txt file named after the input image stem.
-    E.g. input: /tmp/abc123.png → output: <output_dir>/abc123.txt
-    """
+    """Read the text/markdown file that model.infer() writes to output_dir."""
     stem = os.path.splitext(os.path.basename(image_path))[0]
-    result_path = os.path.join(output_dir, f"{stem}.txt")
+    extensions = (".txt", ".md", ".mmd")
 
-    if not os.path.exists(result_path):
-        # Fall back: scan for any .txt file written to the output dir
-        txt_files = [f for f in os.listdir(output_dir) if f.endswith(".txt")]
-        if not txt_files:
-            raise ValueError(
-                f"DeepSeek-OCR-2 produced no output file in {output_dir}. "
-                "Check that the model and image loaded correctly."
-            )
-        result_path = os.path.join(output_dir, txt_files[0])
+    for extension in extensions:
+        result_path = os.path.join(output_dir, f"{stem}{extension}")
+        if os.path.exists(result_path):
+            return _read_text_file(result_path)
 
-    with open(result_path, "r", encoding="utf-8") as f:
+    # Fall back: scan recursively because some model revisions write nested
+    # result files or use markdown-like extensions for structured OCR output.
+    for root, _dirs, files in os.walk(output_dir):
+        for name in sorted(files):
+            if name.endswith(extensions):
+                return _read_text_file(os.path.join(root, name))
+
+    raise ValueError(
+        f"DeepSeek-OCR-2 produced no output file in {output_dir}. "
+        "Check that the model and image loaded correctly."
+    )
+
+
+def _read_text_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
 
@@ -117,15 +155,15 @@ def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
     Handles raster images directly. PDFs are rasterized to the first page.
     Uses delete=False so the path remains valid after close.
     """
+    mime_type = _normalize_mime_type(mime_type)
+
     if mime_type == "application/pdf":
-        try:
-            from pdf2image import convert_from_bytes
-        except ImportError as exc:
-            raise RuntimeError(
-                "PDF support requires pdf2image and poppler. "
-                "Install with: pip install pdf2image"
-            ) from exc
-        pages = convert_from_bytes(image_bytes, dpi=200)
+        pdf2image = _import_optional_module(
+            "pdf2image",
+            "PDF support requires pdf2image and poppler. "
+            "Install with: pip install pdf2image",
+        )
+        pages = pdf2image.convert_from_bytes(image_bytes, dpi=200)
         if not pages:
             raise ValueError("PDF contained no renderable pages.")
         buf = io.BytesIO()
@@ -133,14 +171,24 @@ def _write_temp_image(image_bytes: bytes, mime_type: str) -> str:
         image_bytes = buf.getvalue()
         suffix = ".png"
     else:
-        from PIL import Image as _PILImage
-
-        _PILImage.open(io.BytesIO(image_bytes)).verify()  # validate before writing
+        image_module = _import_optional_module(
+            "PIL.Image",
+            "Image validation requires Pillow. Install with: pip install pillow",
+        )
+        try:
+            with image_module.open(io.BytesIO(image_bytes)) as image:
+                image.verify()
+        except Exception as exc:
+            raise ValueError("Input image bytes are not a valid image.") from exc
         suffix = _mime_to_suffix(mime_type)
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(image_bytes)
         return f.name
+
+
+def _normalize_mime_type(mime_type: str) -> str:
+    return mime_type.split(";", 1)[0].strip().lower()
 
 
 def _mime_to_suffix(mime_type: str) -> str:
@@ -149,8 +197,25 @@ def _mime_to_suffix(mime_type: str) -> str:
         "image/jpeg": ".jpg",
         "image/jpg": ".jpg",
         "image/webp": ".webp",
+        "image/gif": ".gif",
         "image/tiff": ".tiff",
-    }.get(mime_type, ".png")
+    }.get(_normalize_mime_type(mime_type), ".png")
+
+
+def _safe_unlink(path: str) -> None:
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.debug("Failed to delete temporary OCR image %s", path, exc_info=True)
+
+
+def _import_optional_module(module_name: str, install_hint: str) -> Any:
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        raise RuntimeError(install_hint) from exc
 
 
 @lru_cache(maxsize=1)
@@ -160,30 +225,35 @@ def _load_model(model_id: str) -> tuple[Any, Any]:
     NOTE: model_id is the cache key. If settings change between calls
     (e.g. in tests), clear the cache with _load_model.cache_clear().
     """
-    try:
-        import torch
-        from transformers import AutoModel, AutoTokenizer
-    except ImportError as exc:
-        raise RuntimeError(
-            "Local DeepSeek OCR requires torch and transformers. "
-            "Install with: pip install torch transformers"
-        ) from exc
+    torch = _import_optional_module(
+        "torch",
+        "Local DeepSeek OCR requires torch. Install with: pip install torch",
+    )
+    transformers = _import_optional_module(
+        "transformers",
+        "Local DeepSeek OCR requires transformers. "
+        "Install with: pip install transformers",
+    )
 
     if not torch.cuda.is_available():
-        logger.warning(
-            "DeepSeek-OCR-2 is running on CPU. This will be very slow and "
-            "may OOM on typical hardware. A CUDA GPU is strongly recommended."
+        raise RuntimeError(
+            "Local DeepSeek OCR requires a CUDA GPU. DeepSeek-OCR-2 uses "
+            "flash_attention_2 and .cuda() per the official model card."
+        )
+    if importlib.util.find_spec("flash_attn") is None:
+        raise RuntimeError(
+            "Local DeepSeek OCR requires flash-attn for flash_attention_2. "
+            "Install with: pip install flash-attn==2.7.3 --no-build-isolation"
         )
 
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_id,
         trust_remote_code=True,
     )
 
     # _attn_implementation, use_safetensors, bfloat16, and .cuda() are all
-    # required per the official model card. flash-attn must be installed
-    # separately: pip install flash-attn==2.7.3 --no-build-isolation
-    model = AutoModel.from_pretrained(
+    # required per the official model card.
+    model = transformers.AutoModel.from_pretrained(
         model_id,
         trust_remote_code=True,
         use_safetensors=True,

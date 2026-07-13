@@ -1,39 +1,181 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Calculator, PenTool } from "lucide-react";
+import {
+  ArrowRight,
+  Calculator,
+  Home,
+  Menu,
+  PenTool,
+  X,
+} from "lucide-react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export function SiteHeader() {
+const navigation = [
+  { href: "/#features", label: "Features" },
+  { href: "/#how-it-works", label: "How it works" },
+  { href: "/dashboard/solve", label: "Solver" },
+];
+
+type SiteHeaderProps = {
+  currentPath?: string;
+  variant?: "marketing" | "solver";
+};
+
+export function SiteHeader({
+  currentPath = "/",
+  variant = "marketing",
+}: SiteHeaderProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isSolver = variant === "solver";
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [currentPath]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [menuOpen]);
+
+  const isActive = (href: string) =>
+    href === "/dashboard/solve" && currentPath.startsWith("/dashboard");
+
   return (
-    <header className="sticky top-0 z-40 border-b border-border/70 bg-background/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
-        <Link className="flex items-center gap-3" href="/">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Calculator className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold tracking-tight">IntoMath</p>
-            <p className="text-xs text-muted-foreground">Clear math steps</p>
-          </div>
+    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75">
+      <div
+        className="relative mx-auto flex h-[4.5rem] max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8"
+      >
+        <Link
+          aria-label="IntoMath home"
+          className="group flex shrink-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+          href="/"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:-rotate-3">
+            <Calculator className="h-[1.125rem] w-[1.125rem]" />
+          </span>
+          <span className="text-base font-semibold tracking-[-0.025em]">
+            IntoMath
+          </span>
         </Link>
 
-        <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
-          <Link href="#features">Features</Link>
-          <Link href="#how-it-works">How it works</Link>
-          <Link href="/dashboard/solve">Solver</Link>
+        <nav
+          aria-label="Primary navigation"
+          className="absolute left-1/2 hidden -translate-x-1/2 items-center rounded-full border border-border/70 bg-card/70 p-1 text-sm shadow-sm md:flex"
+        >
+          {navigation.map(({ href, label }) => {
+            const active = isActive(href);
+            return (
+              <Link
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "rounded-full px-4 py-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                )}
+                href={href}
+                key={href}
+              >
+                {label}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Link href="/dashboard/solve">
-            <Button className="gap-2" size="sm">
+          <Link
+            className={cn(
+              buttonVariants({
+                size: "sm",
+                variant: isSolver ? "outline" : "default",
+              }),
+              "hidden gap-2 sm:inline-flex",
+            )}
+            href={isSolver ? "/" : "/dashboard/solve"}
+          >
+            {isSolver ? (
+              <Home className="h-4 w-4" />
+            ) : (
               <PenTool className="h-4 w-4" />
-              Open solver
-            </Button>
+            )}
+            {isSolver ? "Back home" : "Open solver"}
           </Link>
+          <button
+            aria-controls="mobile-navigation"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+            onClick={() => setMenuOpen((open) => !open)}
+            type="button"
+          >
+            {menuOpen ? (
+              <X className="h-[1.125rem] w-[1.125rem]" />
+            ) : (
+              <Menu className="h-[1.125rem] w-[1.125rem]" />
+            )}
+          </button>
         </div>
       </div>
+
+      {menuOpen && (
+        <div
+          className="border-t border-border/60 bg-background px-4 py-4 shadow-lg md:hidden"
+          id="mobile-navigation"
+        >
+          <nav
+            aria-label="Mobile navigation"
+            className="mx-auto grid max-w-7xl gap-1"
+          >
+            {navigation.map(({ href, label }) => {
+              const active = isActive(href);
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-colors",
+                    active
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  )}
+                  href={href}
+                  key={href}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  {label}
+                  {active && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
+                </Link>
+              );
+            })}
+            <Link
+              className={cn(
+                buttonVariants({
+                  variant: isSolver ? "outline" : "default",
+                }),
+                "mt-3 w-full gap-2 sm:hidden",
+              )}
+              href={isSolver ? "/" : "/dashboard/solve"}
+              onClick={() => setMenuOpen(false)}
+            >
+              {isSolver ? "Back to home" : "Open solver"}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </nav>
+        </div>
+      )}
     </header>
   );
 }

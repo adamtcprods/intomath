@@ -1,6 +1,7 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -10,6 +11,7 @@ import {
   ImagePlus,
   LoaderCircle,
   Sparkles,
+  X,
 } from "lucide-react";
 
 import { MathText } from "@/components/math/math-text";
@@ -44,9 +46,15 @@ export function SolveWorkspace() {
     setInput,
     setImageBase64,
     setImageMimeType,
+    loadProblem,
+    clearAttachment: clearStoredAttachment,
   } = useSolveWorkspaceStore();
   const solveMutation = useSolveProblem();
+  const searchParams = useSearchParams();
+  const promptFromUrl = searchParams.get("prompt");
   const result = solveMutation.data;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileReaderRef = useRef<FileReader | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
 
@@ -85,28 +93,65 @@ export function SolveWorkspace() {
   }, [result?.request_id]);
 
   useEffect(() => {
+    if (!promptFromUrl) return;
+    fileReaderRef.current?.abort();
+    fileReaderRef.current = null;
+    loadProblem(promptFromUrl);
+  }, [loadProblem, promptFromUrl]);
+
+  useEffect(
+    () => () => {
+      fileReaderRef.current?.abort();
+    },
+    [],
+  );
+
+  useEffect(() => {
     setActiveStepIndex(0);
   }, [safeActiveQuestionIndex]);
 
-  async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
     if (!file) return;
+    event.currentTarget.value = "";
 
+    fileReaderRef.current?.abort();
     const reader = new FileReader();
+    fileReaderRef.current = reader;
     reader.onload = () => {
+      if (fileReaderRef.current !== reader) return;
       const base64 =
         typeof reader.result === "string"
           ? (reader.result.split(",")[1] ?? null)
           : null;
       setImageBase64(base64);
       setImageMimeType(file.type || null);
+      fileReaderRef.current = null;
+    };
+    reader.onerror = () => {
+      if (fileReaderRef.current === reader) fileReaderRef.current = null;
+    };
+    reader.onabort = () => {
+      if (fileReaderRef.current === reader) fileReaderRef.current = null;
     };
     reader.readAsDataURL(file);
   }
 
   function clearAttachment() {
-    setImageBase64(null);
-    setImageMimeType(null);
+    fileReaderRef.current?.abort();
+    fileReaderRef.current = null;
+    clearStoredAttachment();
+  }
+
+  function selectExample(example: string) {
+    fileReaderRef.current?.abort();
+    fileReaderRef.current = null;
+    loadProblem(example);
+  }
+
+  function clearProblemBox() {
+    setInput("");
+    clearAttachment();
   }
 
   async function onSolve() {
@@ -148,12 +193,69 @@ export function SolveWorkspace() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <Textarea
-              className="min-h-[180px]"
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Example: Solve 2x + 5 = 17 and explain each step."
-              value={input}
-            />
+            <div className="relative rounded-xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">
+              <Textarea
+                className="min-h-[180px] resize-none rounded-none border-0 bg-transparent pb-14 shadow-none focus-visible:ring-0"
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Example: Solve 2x + 5 = 17 and explain each step."
+                value={input}
+              />
+              <Button
+                aria-label={
+                  imageBase64 ? "Replace attached image" : "Add an image"
+                }
+                className={cn(
+                  "absolute bottom-3 left-3 h-9 w-9 text-muted-foreground",
+                  imageBase64 &&
+                    "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+                )}
+                onClick={() => fileInputRef.current?.click()}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <ImagePlus className="h-4 w-4" />
+              </Button>
+              <Input
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={handleFileUpload}
+                ref={fileInputRef}
+                type="file"
+              />
+              <Button
+                aria-label="Clear problem and attached image"
+                className="absolute bottom-3 right-3 h-9 w-9 text-muted-foreground hover:text-foreground"
+                disabled={!input && !imageBase64}
+                onClick={clearProblemBox}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {imageBase64 ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                <span className="flex min-w-0 items-center gap-2 text-primary">
+                  <ImagePlus className="h-4 w-4 shrink-0" />
+                  <span className="truncate">
+                    Image attached{imageMimeType ? ` · ${imageMimeType}` : ""}
+                  </span>
+                </span>
+                <Button
+                  aria-label="Remove attached image"
+                  className="h-8 w-8 shrink-0"
+                  onClick={clearAttachment}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : null}
 
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
@@ -161,35 +263,13 @@ export function SolveWorkspace() {
                   <button
                     key={example}
                     className="rounded-full border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-                    onClick={() => setInput(example)}
+                    onClick={() => selectExample(example)}
                     type="button"
                   >
                     {example}
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground hover:border-primary/40 hover:bg-primary/5">
-                <ImagePlus className="h-4 w-4 text-primary" />
-                <span>{imageBase64 ? "Photo attached" : "Add a photo"}</span>
-                <Input
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                  type="file"
-                />
-              </label>
-              {imageBase64 ? (
-                <Button
-                  onClick={clearAttachment}
-                  type="button"
-                  variant="outline"
-                >
-                  Remove
-                </Button>
-              ) : null}
             </div>
 
             <Button
@@ -248,6 +328,20 @@ export function SolveWorkspace() {
                 ) : null}
               </CardContent>
             </Card>
+
+            {result.warnings.length ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                <p className="flex items-center gap-2 font-medium">
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                  Please note
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {result.warnings.map((warning, index) => (
+                    <li key={`${warning}-${index}`}>• {warning}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {hasQuestionSwitcher ? (
               <Card className="border-border/70">
@@ -409,20 +503,6 @@ export function SolveWorkspace() {
                   ) : null}
                 </CardContent>
               </Card>
-            ) : null}
-
-            {result.warnings.length ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
-                <p className="mb-2 flex items-center gap-2 font-medium">
-                  <AlertTriangle className="h-4 w-4" />
-                  Notes
-                </p>
-                <ul className="space-y-1">
-                  {result.warnings.map((warning) => (
-                    <li key={warning}>• {warning}</li>
-                  ))}
-                </ul>
-              </div>
             ) : null}
           </>
         ) : (

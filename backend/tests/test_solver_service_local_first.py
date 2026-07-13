@@ -8,8 +8,13 @@ from app.db.base import Base
 from app.db.models.problem_attempt import ProblemAttempt  # noqa: F401
 from app.db.models.solver_run import SolverRun  # noqa: F401
 from app.db.models.visualization_artifact import VisualizationArtifact  # noqa: F401
+from app.schemas.common import Difficulty, ProblemType
 from app.schemas.solve import SolveRequest
-from app.services.model_router import HARD_MODEL, LOCAL_DETERMINISTIC_SOLVER_MODEL
+from app.services.model_router import (
+    HARD_MODEL,
+    JSON_SECONDARY_FALLBACK_MODEL,
+    LOCAL_DETERMINISTIC_SOLVER_MODEL,
+)
 from app.services.solver_service import SolverService
 
 
@@ -20,6 +25,34 @@ class FailingModelClient:
         raise AssertionError(
             "OpenRouter should not be called for local-supported prompts"
         )
+
+
+class FallbackSequenceModelClient:
+    enabled = True
+
+    async def complete_json(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        if kwargs["model"] == HARD_MODEL:
+            raise RuntimeError("preferred model unavailable")
+        return {
+            "answer": {"text": "Solved by the secondary model.", "latex": None},
+            "steps": [
+                {
+                    "index": 1,
+                    "title": "Secondary model step",
+                    "explanation": "A valid structured solution was returned.",
+                }
+            ],
+            "parts": [],
+            "confidence": 0.8,
+            "warnings": [],
+        }
+
+
+class AlwaysFailingModelClient:
+    enabled = True
+
+    async def complete_json(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("model unavailable")
 
 
 class ProofModelClient:
@@ -151,3 +184,53 @@ def test_solver_service_routes_geometry_proof_to_model_instead_of_local_bypass()
         "Model proof for part c.",
     ]
     assert all(len(part.steps) == 3 for part in response.parts)
+
+
+def test_structured_solve_records_the_model_that_actually_succeeded() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        service = SolverService(db)
+        service.client = FallbackSequenceModelClient()  # type: ignore[assignment]
+
+        draft = asyncio.run(
+            service._solve_structured(
+                text="Prove a geometry theorem.",
+                problem_type=ProblemType.geometry,
+                difficulty=Difficulty.hard,
+                model=HARD_MODEL,
+                subquestions=[],
+            )
+        )
+    finally:
+        db.close()
+
+    assert draft.solver_model == JSON_SECONDARY_FALLBACK_MODEL
+    assert any("preferred solver was unavailable" in item.lower() for item in draft.warnings)
+
+
+def test_structured_solve_records_local_solver_when_all_models_fail() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        service = SolverService(db)
+        service.client = AlwaysFailingModelClient()  # type: ignore[assignment]
+
+        draft = asyncio.run(
+            service._solve_structured(
+                text="Prove a geometry theorem.",
+                problem_type=ProblemType.geometry,
+                difficulty=Difficulty.hard,
+                model=HARD_MODEL,
+                subquestions=[],
+            )
+        )
+    finally:
+        db.close()
+
+    assert draft.solver_model == LOCAL_DETERMINISTIC_SOLVER_MODEL
+    assert any("local solver" in item.lower() for item in draft.warnings)

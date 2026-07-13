@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -142,9 +143,11 @@ class StructuredSolveDraft:
     confidence: float
     warnings: list[str]
     parts: list[SolvePart] = field(default_factory=list)
+    solver_model: str | None = None
 
 
 _RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(ttl_seconds=900)
+logger = logging.getLogger(__name__)
 
 
 class SolverService:
@@ -163,13 +166,32 @@ class SolverService:
         warnings: list[str] = []
         raw_text = request.input.text.strip()
         normalized_text = raw_text
+        input_type = "image" if request.input.image_base64 else "text"
+        logger.info(
+            "Solve request started request_id=%s input_type=%s text_chars=%s include_visualization=%s",
+            request_id,
+            input_type,
+            len(raw_text),
+            request.options.include_visualization,
+        )
 
         ocr_result = await self.ocr_service.extract_problem_text(
             request.input.image_base64,
             request.input.image_mime_type,
         )
         if ocr_result:
+            logger.info(
+                "OCR extraction completed request_id=%s cleaned_text_chars=%s has_warning=%s",
+                request_id,
+                len(ocr_result.cleaned_text or ""),
+                bool(ocr_result.warning),
+            )
             if ocr_result.warning:
+                logger.warning(
+                    "OCR extraction warning request_id=%s warning=%s",
+                    request_id,
+                    ocr_result.warning,
+                )
                 warnings.append(ocr_result.warning)
             if ocr_result.cleaned_text:
                 normalized_text = (
@@ -182,9 +204,23 @@ class SolverService:
         routing = await self.router.route_async(
             normalized_text, has_image=bool(request.input.image_base64)
         )
+        logger.info(
+            "Solve routing request_id=%s problem_type=%s difficulty=%s parser_model=%s solver_model=%s vision_model=%s",
+            request_id,
+            routing.problem_type.value,
+            routing.difficulty.value,
+            routing.parser_model,
+            routing.solver_model,
+            routing.vision_model,
+        )
         cache_key = self._build_cache_key(normalized_text, request)
         cached_response = _RESPONSE_CACHE.get(cache_key)
         if cached_response is not None:
+            logger.info(
+                "Solve cache hit request_id=%s cache_key_prefix=%s",
+                request_id,
+                cache_key[:12],
+            )
             return cached_response.model_copy(
                 update={"request_id": request_id, "cached": True}
             )
@@ -212,13 +248,20 @@ class SolverService:
                     "matched deterministic local solver patterns for every subquestion"
                 )
             elif not self.client.enabled:
-                candidate_local_subquestion_draft.warnings.append(
-                    "Multiple subquestions were detected, but the model backend is not configured. "
-                    "Each subquestion was routed through the local fallback solver."
+                logger.warning(
+                    "Multi-question solve used local fallback because model client is disabled request_id=%s subquestions=%s",
+                    request_id,
+                    len(detected_subquestions),
                 )
                 local_subquestion_draft = candidate_local_subquestion_draft
+                local_subquestion_reason = "was the only available solver"
 
         if local_result is not None:
+            logger.info(
+                "Using local solver result request_id=%s confidence=%.3f",
+                request_id,
+                local_result.confidence,
+            )
             draft = StructuredSolveDraft(
                 answer=local_result.answer,
                 steps=local_result.steps,
@@ -231,12 +274,23 @@ class SolverService:
                 routing, local_result, original_text=normalized_text
             )
         elif local_subquestion_draft is not None:
+            logger.info(
+                "Using local subquestion draft request_id=%s subquestions=%s",
+                request_id,
+                len(detected_subquestions),
+            )
             draft = local_subquestion_draft
             if local_subquestion_reason:
                 routing = self._with_local_subquestion_routing(
                     routing, reason=local_subquestion_reason
                 )
         else:
+            logger.info(
+                "Using structured model solve request_id=%s model=%s subquestions=%s",
+                request_id,
+                routing.solver_model,
+                len(detected_subquestions),
+            )
             draft = await self._solve_structured(
                 text=normalized_text,
                 problem_type=routing.problem_type,
@@ -244,18 +298,40 @@ class SolverService:
                 model=routing.solver_model,
                 subquestions=detected_subquestions,
             )
+            if draft.solver_model:
+                routing = self._with_structured_solver_routing(
+                    routing, solver_model=draft.solver_model
+                )
         warnings.extend(draft.warnings)
 
         visualization = VisualizationPayload(
             kind="none", summary=None, dsl=None, geogebra=None
         )
         if request.options.include_visualization:
+            logger.info(
+                "Visualization extraction started request_id=%s problem_type=%s parser_model=%s",
+                request_id,
+                routing.problem_type.value,
+                routing.parser_model,
+            )
             extraction = await self.geometry_extractor.extract(
                 solve_text, routing.problem_type, routing.parser_model
             )
+            if extraction.warnings:
+                logger.warning(
+                    "Visualization extraction completed with warnings request_id=%s warning_count=%s",
+                    request_id,
+                    len(extraction.warnings),
+                )
             warnings.extend(extraction.warnings)
             if extraction.dsl.actions:
                 translation = self.translator.translate(extraction.dsl)
+                if translation.issues:
+                    logger.warning(
+                        "Visualization translation completed with issues request_id=%s issue_count=%s",
+                        request_id,
+                        len(translation.issues),
+                    )
                 warnings.extend(translation.issues)
                 kind = (
                     "graph"
@@ -278,6 +354,14 @@ class SolverService:
                     ),
                 )
 
+        public_warnings = self._without_backend_config_warnings(warnings)
+        if len(public_warnings) != len(warnings):
+            logger.info(
+                "Suppressed backend-only warnings from API response request_id=%s suppressed_count=%s",
+                request_id,
+                len(warnings) - len(public_warnings),
+            )
+
         response = SolveResponse(
             request_id=request_id,
             status="ok",
@@ -295,7 +379,23 @@ class SolverService:
                 reason=routing.reason,
             ),
             cached=False,
-            warnings=warnings,
+            warnings=public_warnings,
+        )
+
+        if warnings:
+            logger.warning(
+                "Solve completed with warnings request_id=%s warning_count=%s",
+                request_id,
+                len(warnings),
+            )
+        logger.info(
+            "Solve completed request_id=%s confidence=%.3f steps=%s parts=%s visualization=%s cached=%s",
+            request_id,
+            response.confidence,
+            len(response.steps),
+            len(response.parts),
+            response.visualization.kind,
+            response.cached,
         )
 
         self._persist(request, raw_text, normalized_text, routing, response)
@@ -341,6 +441,21 @@ class SolverService:
             reason="; ".join(reason_parts),
         )
 
+    def _with_structured_solver_routing(
+        self, routing: RoutingDecision, *, solver_model: str
+    ) -> RoutingDecision:
+        if solver_model == routing.solver_model:
+            return routing
+
+        return RoutingDecision(
+            problem_type=routing.problem_type,
+            difficulty=routing.difficulty,
+            parser_model=routing.parser_model,
+            solver_model=solver_model,
+            vision_model=routing.vision_model,
+            reason=f"{routing.reason}; result produced by {solver_model}",
+        )
+
     def _with_local_subquestion_routing(
         self, routing: RoutingDecision, *, reason: str
     ) -> RoutingDecision:
@@ -363,10 +478,21 @@ class SolverService:
         )
 
     def _without_backend_config_warnings(self, warnings: list[str]) -> list[str]:
+        backend_only_markers = (
+            "Configure OPENROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OpenRouter",
+            "Model-backed solving failed",
+            "model backend",
+            "model client",
+            "fallback model",
+            "JSON repair attempt failed",
+            "returned invalid JSON",
+        )
         return [
             warning
             for warning in warnings
-            if "Configure OPENROUTER_API_KEY" not in warning
+            if not any(marker in warning for marker in backend_only_markers)
         ]
 
     def _fallback_draft_for_subquestions(
@@ -423,15 +549,11 @@ class SolverService:
                             "could not produce detailed steps for it."
                         ),
                         why_it_happens=(
-                            "Model-backed solving is required for unsupported proof and "
-                            "construction formats."
+                            "Some proof and construction prompts need more structure before "
+                            "a reliable step-by-step solution can be produced."
                         ),
                         hints=[
-                            (
-                                "The configured model backend failed. Try again or use a faster JSON-stable model."
-                                if suppress_config_warnings
-                                else "Configure OPENROUTER_API_KEY for full multi-question solving."
-                            )
+                            "Try again with a clearer problem statement or type this subquestion separately."
                         ],
                     )
                 ]
@@ -488,8 +610,15 @@ class SolverService:
                 f"{self._format_subquestion_hint(subquestions)}\n"
                 f"Problem:\n{text}"
             )
-            model_errors: list[str] = []
+            model_failures: list[tuple[str, str]] = []
             for candidate_model in self._model_candidates(model):
+                logger.info(
+                    "Structured solve model attempt started model=%s problem_type=%s difficulty=%s subquestions=%s",
+                    candidate_model,
+                    problem_type.value,
+                    difficulty.value,
+                    len(subquestions),
+                )
                 try:
                     payload = await self.client.complete_json(
                         model=candidate_model,
@@ -503,12 +632,33 @@ class SolverService:
                         payload, expected_subquestions=subquestions
                     )
                     if candidate_model != model:
-                        draft.warnings.append(
-                            f"Primary model {model} failed; solved with fallback model {candidate_model}."
+                        logger.warning(
+                            "Structured solve succeeded with fallback model preferred_model=%s fallback_model=%s",
+                            model,
+                            candidate_model,
                         )
+                        draft.warnings.append(
+                            "The preferred solver was unavailable; this result was produced by another solver."
+                        )
+                    draft.solver_model = candidate_model
+                    logger.info(
+                        "Structured solve model attempt succeeded model=%s confidence=%.3f steps=%s parts=%s warnings=%s",
+                        candidate_model,
+                        draft.confidence,
+                        len(draft.steps),
+                        len(draft.parts),
+                        len(draft.warnings),
+                    )
                     return draft
                 except Exception as exc:
-                    model_errors.append(f"{candidate_model}: {exc}")
+                    model_failures.append((candidate_model, type(exc).__name__))
+                    logger.warning(
+                        "Structured solve model attempt failed model=%s problem_type=%s difficulty=%s error_type=%s",
+                        candidate_model,
+                        problem_type.value,
+                        difficulty.value,
+                        type(exc).__name__,
+                    )
 
             (
                 fallback_answer,
@@ -516,53 +666,65 @@ class SolverService:
                 fallback_confidence,
                 fallback_warnings,
             ) = self.fallback_solver.solve(text, problem_type, difficulty)
-            fallback_warnings = [
-                warning
-                for warning in fallback_warnings
-                if "Configure OPENROUTER_API_KEY" not in warning
-            ]
-            fallback_warnings.append(
-                "Model-backed solving failed, so the local deterministic solver was used instead: "
-                + "; ".join(model_errors)
+            fallback_warnings = self._without_backend_config_warnings(fallback_warnings)
+            logger.error(
+                "All structured solve model attempts failed; using local fallback problem_type=%s difficulty=%s failures=%s",
+                problem_type.value,
+                difficulty.value,
+                model_failures,
+            )
+            fallback_notice = (
+                "The preferred solver was unavailable; this result was produced by the local solver."
             )
             if len(subquestions) > 1:
-                return self._fallback_draft_for_subquestions(
+                fallback_draft = self._fallback_draft_for_subquestions(
                     text=text,
                     problem_type=problem_type,
                     difficulty=difficulty,
                     subquestions=subquestions,
-                    warning=fallback_warnings[-1],
+                    warning=fallback_notice,
                     suppress_config_warnings=True,
                 )
+                fallback_draft.solver_model = LOCAL_DETERMINISTIC_SOLVER_MODEL
+                return fallback_draft
+            fallback_warnings.append(fallback_notice)
             return StructuredSolveDraft(
                 answer=fallback_answer,
                 steps=fallback_steps,
                 confidence=fallback_confidence,
                 warnings=fallback_warnings,
                 parts=[],
+                solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
             )
 
         if len(subquestions) > 1:
-            return self._fallback_draft_for_subquestions(
+            logger.warning(
+                "Multi-question solve used local fallback because model client is disabled subquestions=%s problem_type=%s difficulty=%s",
+                len(subquestions),
+                problem_type.value,
+                difficulty.value,
+            )
+            fallback_draft = self._fallback_draft_for_subquestions(
                 text=text,
                 problem_type=problem_type,
                 difficulty=difficulty,
                 subquestions=subquestions,
-                warning=(
-                    "Multiple subquestions were detected, but the model backend is not configured. "
-                    "Each subquestion was routed through the local fallback solver."
-                ),
+                suppress_config_warnings=True,
             )
+            fallback_draft.solver_model = LOCAL_DETERMINISTIC_SOLVER_MODEL
+            return fallback_draft
 
         answer, steps, confidence, warnings = self.fallback_solver.solve(
             text, problem_type, difficulty
         )
+        warnings = self._without_backend_config_warnings(warnings)
         return StructuredSolveDraft(
             answer=answer,
             steps=steps,
             confidence=confidence,
             warnings=warnings,
             parts=[],
+            solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
         )
 
     def _model_candidates(self, preferred_model: str) -> list[str]:
