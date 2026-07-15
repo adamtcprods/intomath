@@ -30,7 +30,9 @@ export function MathText({ text, latex, className }: MathTextProps) {
 
 function normalizeLatexList(latex: MathTextProps["latex"]): string[] {
   const formulas = Array.isArray(latex) ? latex : latex ? [latex] : [];
-  return formulas.map(normalizeLatexFormula).filter(Boolean);
+  return formulas
+    .map(normalizeLatexFormula)
+    .filter((formula) => formula && isLikelyMathExpression(formula));
 }
 
 function normalizeLatexFormula(value: string): string {
@@ -61,6 +63,19 @@ function normalizeLatexFormula(value: string): string {
   }
 
   return formula;
+}
+
+function isLikelyMathExpression(formula: string): boolean {
+  if (/[$`\n\r]/.test(formula)) return false;
+
+  // Accented prose rendered in math mode loses spacing and is unreadable. A
+  // useful standalone formula should contain mathematical syntax, not merely
+  // a sentence duplicated from the answer.
+  if (/[^\x00-\x7F]/.test(formula.replace(/[°×÷≤≥≠≈π√∞∠⊥∥]/g, ""))) {
+    return false;
+  }
+
+  return /[=<>+*/^_{}\d]|\\[A-Za-z]+|[°×÷≤≥≠≈π√∞∠⊥∥]/.test(formula);
 }
 
 function renderInlineMath(text: string): ReactNode[] {

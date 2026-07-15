@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type GeoGebraApi = {
@@ -322,21 +323,22 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
                 <p>{errorMessage ?? geogebraLoadError().message}</p>
               </div>
               <div className="flex flex-wrap justify-center gap-2">
-                <button
-                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+                <Button
                   onClick={() => setRetryNonce((value) => value + 1)}
+                  size="sm"
                   type="button"
+                  variant="outline"
                 >
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className="mr-2 h-4 w-4" />
                   Try again
-                </button>
+                </Button>
                 <a
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  className={buttonVariants({ size: "sm" })}
                   href="https://www.geogebra.org/classic"
                   rel="noreferrer"
                   target="_blank"
                 >
-                  <ExternalLink className="h-4 w-4" />
+                  <ExternalLink className="mr-2 h-4 w-4" />
                   Open GeoGebra
                 </a>
               </div>

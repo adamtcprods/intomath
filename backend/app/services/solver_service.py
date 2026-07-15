@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db.models.problem_attempt import ProblemAttempt
 from app.db.models.solver_run import SolverRun
 from app.db.models.visualization_artifact import VisualizationArtifact
+from app.integrations.llama_client import LlamaClient
 from app.integrations.openrouter_client import OpenRouterClient
 from app.schemas.common import Difficulty, ProblemType
 from app.schemas.solve import (
@@ -39,7 +40,7 @@ from app.services.model_router import (
     JSON_FALLBACK_MODEL,
     JSON_SECONDARY_FALLBACK_MODEL,
     LOCAL_DETERMINISTIC_SOLVER_MODEL,
-    LOCAL_HEURISTIC_PARSER_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
     LOCAL_LLAMA_TRIVIA_MODEL,
     ModelRouter,
     RoutingDecision,
@@ -62,6 +63,9 @@ Rules:
 - Top-level `answer` should summarize all requested work. For multiple subquestions, top-level `steps` may summarize the overall flow.
 - Keep every string under 220 characters.
 - Arrays must contain strings only; use [] when there are no items.
+- Put ordinary language only in `text` and `explanation`; never put prose or a complete sentence in a `latex` field.
+- Use `latex` only for a standalone mathematical expression. Do not include `$`, `$$`, `\\(`, `\\)`, `\\[`, `\\]`, or Markdown fences.
+- When no separate formula is useful, set answer `latex` to null and step `latex` to []. Do not repeat the prose answer as LaTeX.
 - `answer` and every part `answer` must be objects, never strings.
 - `title`, `explanation`, `why_it_happens`, and `exam_tip` must be strings or null, never arrays.
 """.strip()
@@ -154,12 +158,15 @@ class SolverService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.client = OpenRouterClient()
-        self.router = ModelRouter()
+        self.llama_client = LlamaClient()
+        self.router = ModelRouter(self.llama_client)
         self.ocr_service = OCRService(self.client)
-        self.geometry_extractor = GeometryExtractor(self.client)
+        self.geometry_extractor = GeometryExtractor(self.client, self.llama_client)
         self.translator = GeoGebraTranslator()
         self.fallback_solver = FallbackSolver()
-        self.local_solver_selector = LocalSolverSelector(self.fallback_solver)
+        self.local_solver_selector = LocalSolverSelector(
+            self.fallback_solver, self.llama_client
+        )
 
     async def solve(self, request: SolveRequest) -> SolveResponse:
         request_id = str(uuid.uuid4())
@@ -435,7 +442,7 @@ class SolverService:
         return RoutingDecision(
             problem_type=local_result.problem_type or routing.problem_type,
             difficulty=routing.difficulty,
-            parser_model=LOCAL_HEURISTIC_PARSER_MODEL,
+            parser_model=LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
             solver_model=solver_model,
             vision_model=routing.vision_model,
             reason="; ".join(reason_parts),
@@ -462,7 +469,7 @@ class SolverService:
         return RoutingDecision(
             problem_type=routing.problem_type,
             difficulty=routing.difficulty,
-            parser_model=LOCAL_HEURISTIC_PARSER_MODEL,
+            parser_model=LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
             solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
             vision_model=routing.vision_model,
             reason=(
@@ -1007,6 +1014,7 @@ class SolverService:
 
     def _build_cache_key(self, normalized_text: str, request: SolveRequest) -> str:
         payload = {
+            "response_version": 2,
             "text": normalized_text,
             "language": request.input.language,
             "options": request.options.model_dump(mode="json"),

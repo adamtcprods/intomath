@@ -21,11 +21,15 @@ class Settings(BaseSettings):
     openrouter_site_url: str = "http://localhost:3000"
     deepseek_ocr_model_id: str = "deepseek-ai/deepseek-ocr-2"
     local_solver_first: bool = True
+    local_llama_enabled: bool = True
     local_solver_llama_detection_enabled: bool = True
     local_solver_llama_trivia_enabled: bool = True
+    local_llama_geometry_extraction_enabled: bool = True
     local_solver_llama_base_url: str = "http://localhost:8080"
-    local_solver_llama_model: str = "hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF"
-    local_solver_llama_timeout_seconds: float = 4.0
+    local_solver_llama_model: str = "unsloth/LFM2.5-8B-A1B-GGUF"
+    local_solver_llama_timeout_seconds: float = 20.0
+    local_llama_geometry_timeout_seconds: float = 30.0
+    local_llama_geometry_max_tokens: int = 1_200
     database_url: str = "sqlite:///./intomath.db"
     cors_origins: str = Field(default="http://localhost:3000")
 

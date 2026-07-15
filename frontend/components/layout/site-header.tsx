@@ -2,17 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowRight,
-  Calculator,
-  Home,
-  Menu,
-  PenTool,
-  X,
-} from "lucide-react";
+import { Calculator, Menu, X } from "lucide-react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
-import { buttonVariants } from "@/components/ui/button";
+
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -23,15 +16,10 @@ const navigation = [
 
 type SiteHeaderProps = {
   currentPath?: string;
-  variant?: "marketing" | "solver";
 };
 
-export function SiteHeader({
-  currentPath = "/",
-  variant = "marketing",
-}: SiteHeaderProps) {
+export function SiteHeader({ currentPath = "/" }: SiteHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const isSolver = variant === "solver";
 
   useEffect(() => {
     setMenuOpen(false);
@@ -71,7 +59,7 @@ export function SiteHeader({
 
         <nav
           aria-label="Primary navigation"
-          className="absolute left-1/2 hidden -translate-x-1/2 items-center rounded-full border border-border/70 bg-card/70 p-1 text-sm shadow-sm md:flex"
+          className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 text-sm md:flex"
         >
           {navigation.map(({ href, label }) => {
             const active = isActive(href);
@@ -79,9 +67,9 @@ export function SiteHeader({
               <Link
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "rounded-full px-4 py-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "rounded-lg px-3 py-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   active
-                    ? "bg-primary text-primary-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground",
                 )}
                 href={href}
@@ -95,23 +83,7 @@ export function SiteHeader({
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Link
-            className={cn(
-              buttonVariants({
-                size: "sm",
-                variant: isSolver ? "outline" : "default",
-              }),
-              "hidden gap-2 sm:inline-flex",
-            )}
-            href={isSolver ? "/" : "/dashboard/solve"}
-          >
-            {isSolver ? (
-              <Home className="h-4 w-4" />
-            ) : (
-              <PenTool className="h-4 w-4" />
-            )}
-            {isSolver ? "Back home" : "Open solver"}
-          </Link>
+
           <button
             aria-controls="mobile-navigation"
             aria-expanded={menuOpen}
@@ -160,19 +132,7 @@ export function SiteHeader({
                 </Link>
               );
             })}
-            <Link
-              className={cn(
-                buttonVariants({
-                  variant: isSolver ? "outline" : "default",
-                }),
-                "mt-3 w-full gap-2 sm:hidden",
-              )}
-              href={isSolver ? "/" : "/dashboard/solve"}
-              onClick={() => setMenuOpen(false)}
-            >
-              {isSolver ? "Back to home" : "Open solver"}
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+
           </nav>
         </div>
       )}

@@ -13,14 +13,14 @@ export function SiteFooter() {
         </div>
         <div>
           <p className="mb-3 font-medium text-foreground">Product</p>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Link href="#features">Features</Link>
             <Link href="/dashboard/solve">Solver</Link>
           </div>
         </div>
         <div>
           <p className="mb-3 font-medium text-foreground">Resources</p>
-          <div className="space-y-2">
+          <div className="flex flex-col gap-2">
             <Link href="#how-it-works">How it works</Link>
             <Link href="https://www.geogebra.org" target="_blank">
               GeoGebra

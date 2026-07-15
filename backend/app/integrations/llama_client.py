@@ -21,17 +21,29 @@ class LlamaClient:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.settings.local_solver_llama_detection_enabled)
+        return bool(self.settings.local_llama_enabled)
 
     @property
     def model(self) -> str:
         return self.settings.local_solver_llama_model
 
-    async def generate_json(self, *, prompt: str) -> dict[str, Any]:
+    async def generate_json(
+        self,
+        *,
+        prompt: str,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not self.enabled:
-            raise RuntimeError("Local Llama detection is disabled.")
+            raise RuntimeError("Local llama.cpp integration is disabled.")
 
-        timeout_seconds = self.settings.local_solver_llama_timeout_seconds
+        request_timeout = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else self.settings.local_solver_llama_timeout_seconds
+        )
+        request_max_tokens = max_tokens if max_tokens is not None else 500
         base_url = f"{self.settings.local_solver_llama_base_url.rstrip('/')}/v1"
 
         client = AsyncOpenAI(
@@ -39,16 +51,27 @@ class LlamaClient:
             api_key="llama-server",
         )
 
+        response_format: dict[str, Any] = {"type": "json_object"}
+        if json_schema is not None:
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "intomath_response",
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            }
+
         try:
             response = await asyncio.wait_for(
                 client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
+                    response_format=response_format,  # type: ignore[arg-type]
                     temperature=0.0,
-                    max_tokens=500,
+                    max_tokens=request_max_tokens,
                 ),
-                timeout=timeout_seconds + 0.5,
+                timeout=request_timeout + 0.5,
             )
         except (asyncio.TimeoutError, TimeoutError) as exc:
             raise RuntimeError(

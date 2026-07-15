@@ -135,90 +135,74 @@ class OpenRouterClient:
         max_tokens: int,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        payload = self._chat_json_payload(
-            model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            json_schema=json_schema,
-            schema_name=schema_name,
-            max_tokens=max_tokens,
-        )
+        current_schema = json_schema
+        include_response_format = True
+        include_reasoning_controls = True
+        enable_response_healing = True
 
-        try:
-            return await self._post_chat_completions(
-                payload, model=model, timeout_seconds=timeout_seconds
-            )
-        except RuntimeError as exc:
-            if self._is_optional_json_control_unsupported_error(exc):
-                logger.warning(
-                    "OpenRouter optional JSON controls unsupported; retrying with reduced controls model=%s",
-                    model,
-                )
-                include_reasoning_controls, enable_response_healing = (
-                    self._supported_optional_json_controls_after_error(exc)
-                )
-                payload = self._chat_json_payload(
-                    model=model,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=temperature,
-                    json_schema=json_schema,
-                    schema_name=schema_name,
-                    max_tokens=max_tokens,
-                    include_reasoning_controls=include_reasoning_controls,
-                    enable_response_healing=enable_response_healing,
-                )
-                try:
-                    return await self._post_chat_completions(
-                        payload, model=model, timeout_seconds=timeout_seconds
-                    )
-                except RuntimeError as retry_exc:
-                    if self._is_optional_json_control_unsupported_error(retry_exc):
-                        logger.warning(
-                            "OpenRouter optional JSON controls still unsupported; retrying with controls disabled model=%s",
-                            model,
-                        )
-                        payload = self._chat_json_payload(
-                            model=model,
-                            system_prompt=system_prompt,
-                            user_prompt=user_prompt,
-                            temperature=temperature,
-                            json_schema=json_schema,
-                            schema_name=schema_name,
-                            max_tokens=max_tokens,
-                            include_reasoning_controls=False,
-                            enable_response_healing=False,
-                        )
-                        try:
-                            return await self._post_chat_completions(
-                                payload, model=model, timeout_seconds=timeout_seconds
-                            )
-                        except RuntimeError as final_optional_exc:
-                            retry_exc = final_optional_exc
-                    if json_schema is None or not self._is_schema_unsupported_error(
-                        retry_exc
-                    ):
-                        raise retry_exc
-                    exc = retry_exc
-            if json_schema is None or not self._is_schema_unsupported_error(exc):
-                raise
-            logger.warning(
-                "OpenRouter JSON schema response_format unsupported; retrying with json_object model=%s",
-                model,
-            )
+        for _ in range(6):
             payload = self._chat_json_payload(
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=temperature,
-                json_schema=None,
+                json_schema=current_schema,
                 schema_name=schema_name,
                 max_tokens=max_tokens,
+                include_response_format=include_response_format,
+                include_reasoning_controls=include_reasoning_controls,
+                enable_response_healing=enable_response_healing,
             )
-            return await self._post_chat_completions(
-                payload, model=model, timeout_seconds=timeout_seconds
-            )
+            try:
+                return await self._post_chat_completions(
+                    payload, model=model, timeout_seconds=timeout_seconds
+                )
+            except RuntimeError as exc:
+                if self._is_optional_json_control_unsupported_error(exc) and (
+                    include_reasoning_controls or enable_response_healing
+                ):
+                    logger.warning(
+                        "OpenRouter optional JSON controls unsupported; retrying with reduced controls model=%s",
+                        model,
+                    )
+                    supported_reasoning, supported_healing = (
+                        self._supported_optional_json_controls_after_error(exc)
+                    )
+                    next_reasoning = (
+                        include_reasoning_controls and supported_reasoning
+                    )
+                    next_healing = enable_response_healing and supported_healing
+                    if (
+                        next_reasoning == include_reasoning_controls
+                        and next_healing == enable_response_healing
+                    ):
+                        next_reasoning = False
+                        next_healing = False
+                    include_reasoning_controls = next_reasoning
+                    enable_response_healing = next_healing
+                    continue
+
+                if self._is_schema_unsupported_error(exc):
+                    if current_schema is not None:
+                        logger.warning(
+                            "OpenRouter JSON schema response_format unsupported; retrying with json_object model=%s",
+                            model,
+                        )
+                        current_schema = None
+                        continue
+                    if include_response_format:
+                        logger.warning(
+                            "OpenRouter response_format unsupported; retrying with prompt-only JSON model=%s",
+                            model,
+                        )
+                        include_response_format = False
+                        enable_response_healing = False
+                        continue
+                raise
+
+        raise RuntimeError(
+            f"OpenRouter compatibility retries were exhausted for model {model}."
+        )
 
     async def _post_chat_completions(
         self, payload: dict[str, Any], *, model: str, timeout_seconds: float
@@ -331,6 +315,7 @@ class OpenRouterClient:
         json_schema: dict[str, Any] | None,
         schema_name: str,
         max_tokens: int,
+        include_response_format: bool = True,
         include_reasoning_controls: bool = True,
         enable_response_healing: bool = True,
     ) -> dict[str, Any]:
@@ -357,10 +342,11 @@ class OpenRouterClient:
                 },
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": response_format,
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if include_response_format:
+            payload["response_format"] = response_format
         if enable_response_healing:
             payload["plugins"] = [{"id": "response-healing"}]
         if include_reasoning_controls:

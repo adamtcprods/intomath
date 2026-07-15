@@ -11,7 +11,7 @@ export function DashboardShell({
 }) {
   return (
     <div className="min-h-screen bg-background">
-      <SiteHeader currentPath={currentPath} variant="solver" />
+      <SiteHeader currentPath={currentPath} />
 
       <main>{children}</main>
     </div>

@@ -1,6 +1,13 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -154,6 +161,19 @@ export function SolveWorkspace() {
     clearAttachment();
   }
 
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key !== "Enter" ||
+      (!event.metaKey && !event.ctrlKey) ||
+      event.nativeEvent.isComposing
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!solveMutation.isPending) void onSolve();
+  }
+
   async function onSolve() {
     if (!activePrompt && !imageBase64) return;
 
@@ -178,62 +198,79 @@ export function SolveWorkspace() {
     <div
       className={cn(
         "mx-auto grid w-full gap-6 px-4 py-6 lg:px-6 lg:py-8",
-        hasVisualization
-          ? "max-w-[100rem] lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.25fr)] xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.25fr)_minmax(440px,0.9fr)]"
-          : "max-w-7xl lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.35fr)]",
+        result
+          ? hasVisualization
+            ? "max-w-[100rem] lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.25fr)] xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.25fr)_minmax(440px,0.9fr)]"
+            : "max-w-7xl lg:grid-cols-[minmax(320px,0.85fr)_minmax(0,1.35fr)]"
+          : "max-w-3xl",
       )}
     >
       <section className="space-y-4">
         <Card className="border-border/70">
           <CardHeader>
-            <CardTitle>What do you want to solve?</CardTitle>
-            <CardDescription>
+            <CardTitle id="problem-input-label">What do you want to solve?</CardTitle>
+            <CardDescription id="problem-input-help">
               Type a problem or attach a photo. Clear, specific questions work
               best.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="relative rounded-xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">
+            <div className="overflow-hidden rounded-xl border border-input bg-background shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring">
               <Textarea
-                className="min-h-[180px] resize-none rounded-none border-0 bg-transparent pb-14 shadow-none focus-visible:ring-0"
+                aria-describedby="problem-input-help"
+                aria-labelledby="problem-input-label"
+                className={cn(
+                  "resize-none rounded-none border-0 bg-transparent shadow-none focus-visible:ring-0",
+                  result ? "min-h-[180px]" : "min-h-[220px]",
+                )}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Example: Solve 2x + 5 = 17 and explain each step."
+                onKeyDown={handlePromptKeyDown}
+                placeholder="Type or paste your math problem here…"
                 value={input}
               />
-              <Button
-                aria-label={
-                  imageBase64 ? "Replace attached image" : "Add an image"
-                }
-                className={cn(
-                  "absolute bottom-3 left-3 h-9 w-9 text-muted-foreground",
-                  imageBase64 &&
-                    "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
-                )}
-                onClick={() => fileInputRef.current?.click()}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <ImagePlus className="h-4 w-4" />
-              </Button>
-              <Input
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                className="hidden"
-                onChange={handleFileUpload}
-                ref={fileInputRef}
-                type="file"
-              />
-              <Button
-                aria-label="Clear problem and attached image"
-                className="absolute bottom-3 right-3 h-9 w-9 text-muted-foreground hover:text-foreground"
-                disabled={!input && !imageBase64}
-                onClick={clearProblemBox}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center justify-between border-t border-input px-2 py-2">
+                <Button
+                  aria-label={
+                    imageBase64 ? "Replace attached image" : "Add an image"
+                  }
+                  className={cn(
+                    "gap-2 text-muted-foreground",
+                    imageBase64 &&
+                      "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+                  )}
+                  onClick={() => fileInputRef.current?.click()}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  {imageBase64 ? "Replace image" : "Attach image"}
+                </Button>
+                <Input
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  ref={fileInputRef}
+                  type="file"
+                />
+                <div className="flex items-center gap-2">
+                  <span className="hidden text-xs text-muted-foreground sm:inline">
+                    Ctrl/⌘ + Enter to solve
+                  </span>
+                  {input || imageBase64 ? (
+                    <Button
+                      aria-label="Clear problem and attached image"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={clearProblemBox}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
             {imageBase64 ? (
@@ -257,12 +294,15 @@ export function SolveWorkspace() {
               </div>
             ) : null}
 
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
+            <details className="group">
+              <summary className="cursor-pointer text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                Try an example
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2">
                 {examples.map((example) => (
                   <button
                     key={example}
-                    className="rounded-full border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                    className="rounded-full border border-border px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
                     onClick={() => selectExample(example)}
                     type="button"
                   >
@@ -270,7 +310,7 @@ export function SolveWorkspace() {
                   </button>
                 ))}
               </div>
-            </div>
+            </details>
 
             <Button
               className="w-full gap-2"
@@ -356,7 +396,7 @@ export function SolveWorkspace() {
                         <button
                           aria-label={`Go to question ${label}`}
                           className={cn(
-                            "rounded-full border px-4 py-2 text-sm font-medium transition-colors",
+                            "rounded-full border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
                             safeActiveQuestionIndex === index
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary",
@@ -431,7 +471,7 @@ export function SolveWorkspace() {
                       <button
                         aria-label={`Go to step ${index + 1}`}
                         className={cn(
-                          "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                          "rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
                           safeActiveStepIndex === index
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-border text-muted-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary",
@@ -505,20 +545,7 @@ export function SolveWorkspace() {
               </Card>
             ) : null}
           </>
-        ) : (
-          <Card className="min-h-[420px] border-dashed border-border/80">
-            <CardContent className="flex min-h-[420px] flex-col items-center justify-center p-10 text-center">
-              <Sparkles className="h-8 w-8 text-primary/70" />
-              <h2 className="mt-4 text-xl font-semibold">
-                Your answer will appear here
-              </h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-                Start with a clear problem. If a graph or construction would
-                help, it will appear alongside the solution.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        ) : null}
       </section>
 
       {hasVisualization ? (

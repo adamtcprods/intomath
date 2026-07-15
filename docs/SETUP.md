@@ -65,10 +65,15 @@ OPENROUTER_SITE_URL=http://localhost:3000
 DATABASE_URL=sqlite:///./intomath.db
 CORS_ORIGINS=http://localhost:3000
 LOCAL_SOLVER_FIRST=true
+LOCAL_LLAMA_ENABLED=true
 LOCAL_SOLVER_LLAMA_DETECTION_ENABLED=true
+LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED=true
+LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
-LOCAL_SOLVER_LLAMA_MODEL=hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF
-LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=4.0
+LOCAL_SOLVER_LLAMA_MODEL=unsloth/LFM2.5-8B-A1B-GGUF
+LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=20.0
+LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS=30.0
+LOCAL_LLAMA_GEOMETRY_MAX_TOKENS=1200
 ```
 
 ### PostgreSQL option
@@ -88,15 +93,31 @@ IntoMath expects the following model policy:
 - hard solving via OpenRouter: `nvidia/nemotron-3-super-120b-a12b:free`
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
-For stronger local-first routing, run a tiny Llama-server detector locally:
+For local-first routing, normalization, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
 
 ```bash
-./llama-server -m hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF --chat-template-kwargs '{"enable_thinking":true}'
+./llama-server \
+  --hf-repo unsloth/LFM2.5-8B-A1B-GGUF \
+  --hf-file LFM2.5-8B-A1B-UD-Q4_K_XL.gguf \
+  --ctx-size 4096 \
+  --threads 6 \
+  --threads-batch 12 \
+  --parallel 1 \
+  --reasoning on \
+  --reasoning-budget 64
 ```
 
-The detector only decides whether a prompt can be normalized into a deterministic-solver shape; the deterministic solver still produces the answer and rejects unsupported hints.
+The model proposes routing decisions and visualization DSL, but deterministic code remains the authority: the solver rejects unsupported normalization hints, and the geometry extractor uses constrained JSON decoding plus validation of labels, dependencies, requested intent, numeric values, expressions, and action count before producing GeoGebra commands. Invented point coordinates are removed unless they are explicit in the prompt, and conservative normalization repairs unambiguous triangle/circle labeling. If local extraction is unavailable, semantically mismatched, or invalid, a small deterministic parser handles only basic constructions.
+
+`LFM2.5-8B-A1B` is reasoning-tuned. Keep `--reasoning-budget 64` so it reaches the final structured response promptly; unrestricted reasoning exhausted a 1,200-token response budget in live testing. On an Intel i5-12400 CPU, the tested `UD-Q4_K_XL` quantization produced approximately 22–24 output tokens/second, with simple geometry extraction taking about 14–18 seconds. The model uses several GiB of RAM, so at least 8–10 GiB of available memory is recommended.
 
 The current code routes solver requests in `backend/app/services/solver_service.py`, `backend/app/services/local_solver_selector.py`, and `backend/app/services/model_router.py`, and uses local DeepSeek OCR for image extraction in `backend/app/services/ocr_service.py`.
+
+To run the bounded live smoke test (it starts and always terminates its own server):
+
+```bash
+PYTHONPATH=backend .venv-local/bin/python backend/scripts/test_lfm_geometry_parser.py
+```
 
 ## Local validation commands
 

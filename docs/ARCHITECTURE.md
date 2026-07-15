@@ -92,11 +92,13 @@ flowchart TD
 - `model_router.py`
   - configurable routing heuristics
 - `local_solver_selector.py`
-  - tries deterministic solving first and optionally uses a tiny local llama.cpp model to normalize supported prompts
+  - tries deterministic solving first and optionally uses the local llama.cpp model to normalize supported prompts
 - `ocr_service.py`
   - image-to-structured-text stage through OpenRouter vision
 - `geometry_extractor.py`
-  - DSL extraction via LLM for geometry-heavy problems, heuristic fallback otherwise
+  - validated, schema-constrained DSL extraction through the local llama.cpp model for local solve routes
+  - remote model extraction for model-backed geometry routes
+  - small deterministic fallback for unavailable, semantically mismatched, or invalid model output
 - `geogebra_translator.py`
   - deterministic DSL → GeoGebra translation
 - `fallback_solver.py`
@@ -131,7 +133,7 @@ Difficulty is then assessed separately:
 | Use case | Model / route |
 |---|---|
 | Supported arithmetic, linear equations, quadratic graphs, simple constructions | `local:deterministic-solver` |
-| Optional local-solver detection / normalization | `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF` (reasoning enabled) via Llama-server |
+| Local routing, normalization, trivia, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF` (`UD-Q4_K_XL`) via llama-server; deterministic validation/fallback remains authoritative |
 | Easy algebra / arithmetic outside deterministic coverage | `nvidia/nemotron-3-nano-30b-a3b:free` via OpenRouter |
 | Hard geometry / proofs / multi-step reasoning | `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |

@@ -1,3 +1,6 @@
+import asyncio
+from typing import Any
+
 import pytest
 
 from app.integrations.openrouter_client import OpenRouterClient
@@ -84,6 +87,54 @@ def test_chat_payload_uses_json_schema_response_format() -> None:
     assert "Do not echo the schema" in payload["messages"][0]["content"]
     assert payload["plugins"] == [{"id": "response-healing"}]
     assert payload["reasoning"] == {"exclude": True}
+
+
+def test_retries_without_response_format_when_model_does_not_support_it() -> None:
+    class ResponseFormatRejectingClient(OpenRouterClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.payloads: list[dict[str, Any]] = []
+
+        async def _post_chat_completions(
+            self,
+            payload: dict[str, Any],
+            *,
+            model: str,
+            timeout_seconds: float,
+        ) -> dict[str, Any]:
+            self.payloads.append(payload)
+            if "response_format" in payload:
+                raise RuntimeError(
+                    "OpenRouter request failed: unsupported parameter response_format"
+                )
+            return {"choices": [{"message": {"content": '{"answer": 2}'}}]}
+
+    client = ResponseFormatRejectingClient()
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "integer"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+
+    response = asyncio.run(
+        client._post_json_chat_with_fallbacks(
+            model="test-model",
+            system_prompt="Return JSON.",
+            user_prompt="Solve 1+1",
+            temperature=0.2,
+            json_schema=schema,
+            schema_name="math_answer",
+            max_tokens=100,
+            timeout_seconds=5.0,
+        )
+    )
+
+    assert response["choices"][0]["message"]["content"] == '{"answer": 2}'
+    assert client.payloads[0]["response_format"]["type"] == "json_schema"
+    assert client.payloads[1]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in client.payloads[2]
+    assert "plugins" not in client.payloads[2]
 
 
 def test_openrouter_api_error_is_reported_without_choices_key() -> None:

@@ -14,7 +14,7 @@ HARD_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 JSON_SECONDARY_FALLBACK_MODEL = EASY_MODEL
 JSON_FALLBACK_MODEL = "openrouter/free"
 LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
-LOCAL_HEURISTIC_PARSER_MODEL = "local:heuristic-parser"
+LOCAL_LLAMA_GEOMETRY_PARSER_MODEL = "local:llama-geometry-parser"
 LOCAL_LLAMA_TRIVIA_MODEL = "local:llama-trivia"
 VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
 
@@ -69,7 +69,7 @@ class RouterClassification:
 
 
 class ModelRouter:
-    """Routes problems using a tiny local classifier when available.
+    """Routes problems using a local llama.cpp classifier when available.
 
     The synchronous `route` method is kept as a structural fallback for tests and
     non-async callers. Production solve flow should use `route_async`, which asks

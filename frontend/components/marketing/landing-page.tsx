@@ -39,9 +39,9 @@ const examplePrompts = [
 
 export function LandingPage() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader />
-      <main>
+      <main className="flex-1">
         <section className="border-b border-border/70 bg-grid-fade">
           <div className="mx-auto grid max-w-7xl gap-10 px-6 py-20 lg:grid-cols-[1fr_0.85fr] lg:px-8 lg:py-24">
             <div className="max-w-3xl">

@@ -15,7 +15,7 @@ Students can type a prompt and receive:
 - hints and common mistakes
 - an interactive GeoGebra visualization when the backend can generate one
 
-Image upload is available for configured OCR/model backends. For supported typed prompts, the backend now tries the local deterministic solver first, even when `OPENROUTER_API_KEY` is configured. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. An optional tiny llama.cpp detector can normalize borderline prompts into those supported shapes, but proof-style geometry stays on model-backed routing.
+Image upload is available for configured OCR/model backends. For supported typed prompts, the backend now tries the local deterministic solver first, even when `OPENROUTER_API_KEY` is configured. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. A local llama.cpp model can normalize borderline prompts and extract validated visualization DSL, while proof-style geometry stays on model-backed routing.
 
 ## Tech stack
 
@@ -91,8 +91,8 @@ The routing layer lives in `backend/app/services/model_router.py`.
 
 Current models and local routes:
 - **Deterministic local solving first:** `local:deterministic-solver`
-- **Heuristic local visualization parsing for local solves:** `local:heuristic-parser`
-- **Optional tiny local detector via llama-server:** `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF` (enable reasoning)
+- **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF` (`UD-Q4_K_XL`) through llama-server with JSON-schema constraints
+- **Local routing and solver normalization:** the same llama.cpp model
 - **Easy / lower-latency solving via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`
 - **Hard / proof-heavy solving via OpenRouter:** `nvidia/nemotron-3-super-120b-a12b:free`
 - **JSON fallback routing via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`, then `openrouter/free`
@@ -193,10 +193,15 @@ Backend default URL: `http://localhost:8000`
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `LOCAL_SOLVER_FIRST` — defaults to `true`; tries deterministic solving before model-backed solving
+- `LOCAL_LLAMA_ENABLED` — defaults to `true`; master switch for the local llama.cpp integration
 - `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; asks local llama-server to detect/normalize supported local-solver prompts when direct deterministic matching fails
+- `LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED` — defaults to `true`; enables the local concept/trivia fallback
+- `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; uses the local model to produce validated visualization DSL for local solve routes
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
-- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `hf.co/unsloth/LiquidAI/LFM2.5-350M-GGUF`
-- `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `4.0`
+- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `unsloth/LFM2.5-8B-A1B-GGUF`
+- `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `20.0`
+- `LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS` — defaults to `30.0`
+- `LOCAL_LLAMA_GEOMETRY_MAX_TOKENS` — defaults to `1200`
 
 ## Validation
 
