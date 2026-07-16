@@ -11,11 +11,17 @@ import {
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-type GeoGebraApi = {
-  evalCommand?: (command: string) => void;
-  setPerspective?: (perspective: string) => void;
-};
+import type {
+  GeoGebraRenderHints,
+  VisualizationEnvironment,
+} from "@/features/solver/types";
+import {
+  applyGeoGebraRenderHints,
+  configureGeoGebraView,
+  executeGeoGebraCommands,
+  type CommandExecutionFailure,
+  type GeoGebraApi,
+} from "@/components/visualization/geogebra-runtime";
 
 type GeoGebraAppletInstance = {
   inject: (container: string) => void;
@@ -44,6 +50,8 @@ type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 interface GeoGebraAppletProps {
   commands: string[];
+  environment?: VisualizationEnvironment;
+  renderHints?: GeoGebraRenderHints;
 }
 
 function geogebraLoadError() {
@@ -168,7 +176,11 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : geogebraLoadError().message;
 }
 
-export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
+export function GeoGebraApplet({
+  commands,
+  environment = "geometry_2d",
+  renderHints,
+}: GeoGebraAppletProps) {
   const reactId = useId();
   const containerId = useMemo(
     () => `geogebra-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`,
@@ -185,13 +197,17 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
   const [scriptStatus, setScriptStatus] = useState<LoadStatus>("idle");
   const [appletStatus, setAppletStatus] = useState<LoadStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [runtimeFailure, setRuntimeFailure] =
+    useState<CommandExecutionFailure | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const injectedRef = useRef(false);
+  const apiRef = useRef<GeoGebraApi | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     injectedRef.current = false;
     setErrorMessage(null);
+    setRuntimeFailure(null);
 
     if (appletCommands.length === 0) {
       setScriptStatus("idle");
@@ -234,6 +250,9 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
     let cancelled = false;
     setAppletStatus("loading");
     setErrorMessage(null);
+    setRuntimeFailure(null);
+    apiRef.current?.remove?.();
+    apiRef.current = null;
     document.getElementById(containerId)?.replaceChildren();
 
     const timeoutId = window.setTimeout(() => {
@@ -247,10 +266,21 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
 
     const markReady = (api: GeoGebraApi) => {
       if (cancelled) return;
+      apiRef.current = api;
 
       try {
-        api.setPerspective?.("G");
-        appletCommands.forEach((command) => api.evalCommand?.(command));
+        configureGeoGebraView(api, environment, renderHints);
+        const execution = executeGeoGebraCommands(api, appletCommands);
+        if (!execution.success && execution.failure) {
+          window.clearTimeout(timeoutId);
+          setRuntimeFailure(execution.failure);
+          setAppletStatus("error");
+          setErrorMessage(
+            `Construction command ${execution.failure.index + 1} failed: ${execution.failure.command}`,
+          );
+          return;
+        }
+        applyGeoGebraRenderHints(api, environment, renderHints);
         window.clearTimeout(timeoutId);
         setAppletStatus("ready");
       } catch (error) {
@@ -271,7 +301,7 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
         showResetIcon: false,
         enableShiftDragZoom: true,
         enableLabelDrags: true,
-        useBrowserForJS: true,
+        useBrowserForJS: false,
         borderColor: null,
         scaleContainerClass: "geogebra-responsive",
         appletOnLoad: markReady,
@@ -291,8 +321,17 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
+      apiRef.current?.remove?.();
+      apiRef.current = null;
     };
-  }, [appletCommands, containerId, scriptStatus]);
+  }, [
+    appletCommands,
+    containerId,
+    environment,
+    renderHints,
+    retryNonce,
+    scriptStatus,
+  ]);
 
   const isLoading =
     appletCommands.length > 0 &&
@@ -318,7 +357,9 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
               <AlertCircle className="h-6 w-6 text-amber-500" />
               <div className="space-y-2">
                 <p className="font-medium text-foreground">
-                  GeoGebra is unavailable right now.
+                  {runtimeFailure
+                    ? "GeoGebra rejected this construction."
+                    : "GeoGebra is unavailable right now."}
                 </p>
                 <p>{errorMessage ?? geogebraLoadError().message}</p>
               </div>
@@ -366,6 +407,15 @@ export function GeoGebraApplet({ commands }: GeoGebraAppletProps) {
             <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
               {commandString}
             </pre>
+            {runtimeFailure ? (
+              <div className="mt-3 border-t border-border/70 pt-3 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                <p>
+                  Failed at command {runtimeFailure.index + 1}: {runtimeFailure.command}
+                </p>
+                <p>{runtimeFailure.detail}</p>
+                <p>Rollback: {runtimeFailure.rollback}</p>
+              </div>
+            ) : null}
           </details>
         ) : null}
       </CardContent>

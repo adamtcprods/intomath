@@ -113,7 +113,7 @@ class FallbackSolver:
         warnings.extend(
             [
                 "This prompt is outside the local deterministic solver.",
-                "Configure OPENROUTER_API_KEY for full model-backed solving and OCR.",
+                "Configure NVIDIA_API_KEY for full model-backed solving.",
             ]
         )
         answer = SolveAnswer(

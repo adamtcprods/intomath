@@ -1,0 +1,11 @@
+{
+  "catalog_sha256": "0eb420707aaec449d09838c769365181c718fefa5913ed0ef5a956cad5dc209c",
+  "command_names": 502,
+  "command_pages_parsed": 502,
+  "generation_timestamp": "2026-07-15T16:52:36.703206+00:00",
+  "generator_version": "1.0.0",
+  "overloads": 1052,
+  "schema_version": "1.0",
+  "upstream_commit": "83d180f2469c47f13f6884fce3cc1926b58c2681",
+  "upstream_repository": "https://github.com/geogebra/manual"
+}

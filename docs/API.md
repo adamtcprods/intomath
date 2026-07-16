@@ -109,6 +109,10 @@ Primary structured solving endpoint.
 - `cached: boolean`
 - `warnings: string[]`
 
+When NVIDIA NIM directly serves the structured solve, `routing.solver_model` is
+prefixed with `nvidia-direct:` followed by the exact NVIDIA-native model ID. This
+keeps the serving provider visible in the response.
+
 ### `answer`
 - `text: string`
 - `latex: string | null`
@@ -140,7 +144,61 @@ Primary structured solving endpoint.
 - `commands: string[]`
 - `command_string: string`
 - `validation_passed: boolean`
-- `issues: string[]`
+- `issues: string[]` (backward-compatible human-readable messages)
+- `validation_issues: GeoGebraValidationIssue[]`
+- `environment: "geometry_2d" | "graphing" | "graphics_3d" | "cas" | "probability" | "statistics" | "spreadsheet"`
+- `retrieved_commands: {name, score, signatures}[]` (development only when `APP_DEBUG=true`)
+
+Each structured validation issue contains:
+
+```json
+{
+  "code": "undefined_reference",
+  "action_index": 3,
+  "command": "Tangent",
+  "output_label": "t",
+  "message": "Reference 'c' is never produced by this construction.",
+  "severity": "error"
+}
+```
+
+### Geometry DSL compatibility
+
+DSL `1.0` high-level actions are still accepted so persisted/cached responses
+continue to render. DSL `1.1` adds `environment`, typed `render_hints`, and
+`EXECUTE_COMMAND`:
+
+```json
+{
+  "version": "1.1",
+  "space": "euclidean_2d",
+  "environment": "geometry_2d",
+  "actions": [
+    {"action": "CREATE_POINT", "label": "A", "coordinates": [0, 0]},
+    {"action": "CREATE_POINT", "label": "B", "coordinates": [4, 0]},
+    {
+      "action": "EXECUTE_COMMAND",
+      "output": "lAB",
+      "command": "Line",
+      "arguments": [
+        {"kind": "reference", "value": "A"},
+        {"kind": "reference", "value": "B"}
+      ]
+    }
+  ],
+  "render_hints": {
+    "perspective": "geometry_2d",
+    "styles": [{"label": "lAB", "color": "#2563EB", "line_thickness": 3}],
+    "viewport": {"x_min": -5, "x_max": 5, "y_min": -5, "y_max": 5}
+  }
+}
+```
+
+Generic argument kinds are `reference`, `number`, `angle`, `point`, `vector`,
+`text`, `boolean`, `expression`, `equation`, `list`, and `interval`. The backend
+may reorder actions by explicit references. Generic commands without `output`
+are allowed only as unreferenceable terminal results and produce an
+`untracked_output` warning.
 
 ## OCR flow
 
@@ -152,12 +210,41 @@ If `image_base64` is present:
 ## Visualization flow
 
 If `include_visualization` is true:
-1. geometry or graph intent is extracted
-2. the system produces a Geometry DSL payload
-3. the translator converts it into GeoGebra commands
-4. both DSL and commands are returned in the response
+1. the problem statement is mechanically classified for actual geometric, functional, positional, or chart structure; `none` stops the visualization flow here
+2. a bounded relevant command set is retrieved from the local catalog
+3. the model emits typed DSL (or the deterministic fallback emits high-level actions)
+4. schema, command selection, signature/type/environment and dependency validation run
+5. a remote plan with action-scoped validation errors gets at most one compact repair turn, followed by full re-validation
+6. trusted code translates the sorted DSL into GeoGebra commands
+7. both DSL and commands are returned; the browser validates each command again at runtime
+
+Remote solve and geometry requests supply strict JSON schemas in their prompts and
+validate each response locally. A provider failure is logged and
+warned separately from a model plan that parsed but failed deterministic validation.
+Geometry then tries the validated local llama.cpp parser, NVIDIA direct Nemotron Super,
+gpt-oss-120b, Nemotron Nano, and gpt-oss-20b in that order, then a limited deterministic
+construction. Every proposed DSL—including NVIDIA direct output—runs through the same
+authoritative validators. Invalid output follows this chain too; it does not stop at an
+invalid but parseable DSL.
+
+Remote attempts have a 25-second default hard timeout. Only direct Nemotron Super and
+gpt-oss-120b receive a model-specific 50-second cold-start allowance. Structured solve
+tries the preferred and alternate explicit NVIDIA Nemotron models, then the remaining
+NVIDIA-native entries. NVIDIA calls
+are non-streaming. Their hosted request contracts omit `response_format`, so responses
+are logged as unenforced proposals; Nemotron thinking is disabled and gpt-oss reasoning
+effort is low. Each structured step logs whether `latex` is empty; math notation
+without a matching formula is surfaced in `warnings`. Scratch-work-style explanation
+fields receive at most one bounded cleanup turn on either provider path.
+
+If visualization validation fails, the solve response remains `status: "ok"`
+when the mathematical solution succeeded. The visualization has no executable
+commands (and normally `kind: "none"`), while `warnings` and
+`validation_issues` explain the visualization failure.
 
 ## Notes
 
 - The frontend currently posts to this API via `frontend/lib/api-client.ts`.
 - The API is intentionally structured for UI rendering rather than chat transcript playback.
+- `commands: string[]` and `command_string` remain available for older clients.
+- Raw model-generated GeoGebra command mode is not exposed by this API.

@@ -82,7 +82,7 @@ class FakeLlamaClient:
         self.calls = 0
         self.last_prompt = ""
 
-    async def generate_json(self, *, prompt: str) -> dict[str, Any]:
+    async def generate_json(self, *, prompt: str, **kwargs: Any) -> dict[str, Any]:
         self.calls += 1
         self.last_prompt = prompt
         if self.raise_error:

@@ -1,35 +1,56 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Iterable
 
-from app.core.config import get_settings
-from app.schemas.geometry_dsl import GeometryAction, GeometryActionType, GeometryDSL
+from app.schemas.geometry_dsl import (
+    AngleArgument,
+    BooleanArgument,
+    EquationArgument,
+    ExpressionArgument,
+    GeoGebraArgument,
+    GeoGebraValidationIssue,
+    GeometryAction,
+    GeometryActionType,
+    GeometryDSL,
+    IntervalArgument,
+    ListArgument,
+    NumberArgument,
+    PointArgument,
+    ReferenceArgument,
+    TextArgument,
+    VectorArgument,
+)
+from app.services.geogebra_command_registry import GeoGebraCommandRegistry
+from app.services.geogebra_validator import GeoGebraDSLValidator
 
 
-@dataclass
+@dataclass(frozen=True)
 class TranslationResult:
     commands: list[str]
     command_string: str
     validation_passed: bool
-    issues: list[str]
+    issues: list[GeoGebraValidationIssue]
+
+    @property
+    def issue_messages(self) -> list[str]:
+        return [issue.message for issue in self.issues]
+
+
+def _format_number(value: float) -> str:
+    if value == 0:
+        return "0"
+    return format(value, ".15g")
+
+
+def _escape_text(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 class GeoGebraTranslator:
-    def __init__(self) -> None:
-        self.settings = get_settings()
-        self.valid_commands = self._load_catalog(self.settings.geogebra_catalog_path)
-        self.fallback_commands = {
-            "Line",
-            "Circle",
-            "Polygon",
-            "Intersect",
-            "Midpoint",
-            "PerpendicularLine",
-            "ParallelLine",
-            "AngleBisector",
-        }
+    def __init__(self, registry: GeoGebraCommandRegistry | None = None) -> None:
+        self.registry = registry or GeoGebraCommandRegistry.cached()
+        self.validator = GeoGebraDSLValidator(self.registry)
         self.default_coordinates = {
             "A": (-4.0, 1.5),
             "B": (4.0, 1.5),
@@ -39,199 +60,134 @@ class GeoGebraTranslator:
             "O": (0.0, 0.0),
         }
 
-    def translate(self, dsl: GeometryDSL) -> TranslationResult:
-        commands: list[str] = []
-        issues: list[str] = []
-        created_labels: set[str] = set()
+    def translate(
+        self,
+        dsl: GeometryDSL,
+        *,
+        allowed_command_names: Iterable[str] | None = None,
+        normalized_problem_text: str | None = None,
+        solved_answer_text: str | None = None,
+    ) -> TranslationResult:
+        validation = self.validator.validate(
+            dsl,
+            allowed_command_names=allowed_command_names,
+            normalized_problem_text=normalized_problem_text,
+            solved_answer_text=solved_answer_text,
+        )
+        issues = list(validation.issues)
+        if not validation.passed:
+            return TranslationResult(
+                commands=[],
+                command_string="",
+                validation_passed=False,
+                issues=issues,
+            )
 
-        for action in dsl.actions:
-            emitted = self._emit_action(action, created_labels, issues)
-            if emitted:
-                commands.extend(emitted)
-
-        self._validate_command_names(commands, issues)
+        commands = [self._emit_action(action) for action in validation.actions]
         return TranslationResult(
             commands=commands,
             command_string="; ".join(commands),
-            validation_passed=len(issues) == 0,
+            validation_passed=True,
             issues=issues,
         )
 
-    def _emit_action(
-        self, action: GeometryAction, created_labels: set[str], issues: list[str]
-    ) -> list[str]:
+    def _emit_action(self, action: GeometryAction) -> str:
+        if action.action is GeometryActionType.EXECUTE_COMMAND:
+            return self._emit_generic_command(action)
+
+        label = action.label or ""
         if action.action is GeometryActionType.CREATE_POINT:
-            label = action.label or f"P{len(created_labels) + 1}"
             coordinates = action.coordinates or self.default_coordinates.get(
-                label, (float(len(created_labels)), 0.0)
+                label, (0.0, 0.0)
             )
-            created_labels.add(label)
-            return [f"{label} = ({coordinates[0]}, {coordinates[1]})"]
+            # Keep v1.0 numeric formatting stable for cached clients and tests.
+            return f"{label} = ({coordinates[0]}, {coordinates[1]})"
 
         if action.action is GeometryActionType.CREATE_LINE:
             points = action.points or action.through or []
-            label_prefix = f"{action.label} = " if action.label else ""
-            if len(points) >= 2:
-                if any(point not in created_labels for point in points[:2]):
-                    issues.append(f"Line references undefined points: {points[:2]}")
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Line({points[0]}, {points[1]})"]
-            issues.append("CREATE_LINE requires two points.")
-            return []
+            return f"{label} = Line({points[0]}, {points[1]})"
 
         if action.action is GeometryActionType.CREATE_CIRCLE:
-            label_prefix = f"{action.label} = " if action.label else ""
             if action.center and action.radius is not None:
-                if action.center not in created_labels:
-                    issues.append(
-                        f"Circle references undefined center: {action.center}"
-                    )
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Circle({action.center}, {action.radius})"]
+                return f"{label} = Circle({action.center}, {action.radius})"
             points = action.through or []
-            if len(points) >= 2:
-                if any(point not in created_labels for point in points[:2]):
-                    issues.append(f"Circle references undefined points: {points[:2]}")
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Circle({points[0]}, {points[1]})"]
-            issues.append("CREATE_CIRCLE requires center/radius or two points.")
-            return []
+            return f"{label} = Circle({', '.join(points)})"
 
         if action.action is GeometryActionType.CREATE_POLYGON:
-            points = action.points or []
-            label_prefix = f"{action.label} = " if action.label else ""
-            if len(points) >= 3:
-                if any(point not in created_labels for point in points):
-                    issues.append(f"Polygon references undefined points: {points}")
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Polygon({', '.join(points)})"]
-            issues.append("CREATE_POLYGON requires at least three points.")
-            return []
+            return f"{label} = Polygon({', '.join(action.points)})"
 
         if action.action is GeometryActionType.INTERSECT:
             objects = action.metadata.get("objects", [])
-            label_prefix = f"{action.label} = " if action.label else ""
-            if len(objects) >= 2:
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Intersect({objects[0]}, {objects[1]})"]
-            issues.append("INTERSECT requires two objects in metadata.objects.")
-            return []
+            return f"{label} = Intersect({objects[0]}, {objects[1]})"
 
         if action.action is GeometryActionType.MIDPOINT:
-            label_prefix = f"{action.label} = " if action.label else ""
-            points = action.points or []
-            if len(points) >= 2:
-                if any(point not in created_labels for point in points[:2]):
-                    issues.append(f"Midpoint references undefined points: {points[:2]}")
-                if action.label:
-                    created_labels.add(action.label)
-                return [f"{label_prefix}Midpoint({points[0]}, {points[1]})"]
-            issues.append("MIDPOINT requires two points.")
-            return []
+            return f"{label} = Midpoint({action.points[0]}, {action.points[1]})"
 
         if action.action is GeometryActionType.PERPENDICULAR:
-            label_prefix = f"{action.label} = " if action.label else ""
-            through_point = action.metadata.get("through_point")
-            reference_line = action.line or action.metadata.get("reference_line")
-            if through_point and reference_line:
-                if through_point not in created_labels:
-                    issues.append(
-                        f"Perpendicular line references undefined point: {through_point}"
-                    )
-                if reference_line not in created_labels:
-                    issues.append(
-                        f"Perpendicular line references undefined line: {reference_line}"
-                    )
-                if action.label:
-                    created_labels.add(action.label)
-                return [
-                    f"{label_prefix}PerpendicularLine({through_point}, {reference_line})"
-                ]
-            issues.append(
-                "PERPENDICULAR requires metadata.through_point and a line reference."
-            )
-            return []
+            through_point = action.metadata["through_point"]
+            return f"{label} = PerpendicularLine({through_point}, {action.line})"
 
         if action.action is GeometryActionType.PARALLEL:
-            label_prefix = f"{action.label} = " if action.label else ""
-            through_point = action.metadata.get("through_point")
-            reference_line = action.line or action.metadata.get("reference_line")
-            if through_point and reference_line:
-                if through_point not in created_labels:
-                    issues.append(
-                        f"Parallel line references undefined point: {through_point}"
-                    )
-                if reference_line not in created_labels:
-                    issues.append(
-                        f"Parallel line references undefined line: {reference_line}"
-                    )
-                if action.label:
-                    created_labels.add(action.label)
-                return [
-                    f"{label_prefix}ParallelLine({through_point}, {reference_line})"
-                ]
-            issues.append(
-                "PARALLEL requires metadata.through_point and a line reference."
-            )
-            return []
+            through_point = action.metadata["through_point"]
+            return f"{label} = ParallelLine({through_point}, {action.line})"
 
         if action.action is GeometryActionType.ANGLE_BISECTOR:
-            label_prefix = f"{action.label} = " if action.label else ""
-            points = action.points or []
-            if len(points) >= 3:
-                if any(point not in created_labels for point in points[:3]):
-                    issues.append(
-                        f"Angle bisector references undefined points: {points[:3]}"
-                    )
-                if action.label:
-                    created_labels.add(action.label)
-                return [
-                    f"{label_prefix}AngleBisector({points[0]}, {points[1]}, {points[2]})"
-                ]
-            issues.append("ANGLE_BISECTOR requires three points.")
-            return []
+            return (
+                f"{label} = AngleBisector("
+                f"{action.points[0]}, {action.points[1]}, {action.points[2]})"
+            )
 
         if action.action is GeometryActionType.CREATE_FUNCTION:
-            equation = action.equation or "x"
-            label = action.label or "f"
-            return [f"{label}(x) = {equation}"]
+            return f"{label}(x) = {action.equation or 'x'}"
 
-        issues.append(f"Unsupported action: {action.action}")
-        return []
+        raise ValueError(f"Unsupported validated action: {action.action.value}")
 
-    def _validate_command_names(self, commands: list[str], issues: list[str]) -> None:
-        valid_commands = self.valid_commands or self.fallback_commands
-        for command in commands:
-            if "=" in command:
-                expression = command.split("=", maxsplit=1)[1].strip()
-            else:
-                expression = command.strip()
-            if "(" not in expression:
-                continue
-            command_name = expression.split("(", maxsplit=1)[0].strip()
-            if (
-                command_name
-                and command_name not in valid_commands
-                and not command_name.endswith("(x)")
-            ):
-                issues.append(
-                    f"Command '{command_name}' is not in the GeoGebra command catalog."
-                )
+    def _emit_generic_command(self, action: GeometryAction) -> str:
+        definition = self.registry.lookup(action.command or "")
+        if definition is None or definition.unsafe_reason:
+            raise ValueError("Generic command reached translation without validation.")
+        arguments = ", ".join(
+            self.serialize_argument(argument) for argument in action.arguments
+        )
+        expression = f"{definition.name}({arguments})"
+        return f"{action.output} = {expression}" if action.output else expression
 
-    def _load_catalog(self, path: Path) -> set[str]:
-        if not path.exists():
-            return set()
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return set()
-        return {
-            entry.get("command_name", "")
-            for entry in payload
-            if isinstance(entry, dict) and entry.get("command_name")
-        }
+    def serialize_argument(self, argument: GeoGebraArgument) -> str:
+        if isinstance(argument, ReferenceArgument):
+            return argument.value
+        if isinstance(argument, NumberArgument):
+            return _format_number(argument.value)
+        if isinstance(argument, AngleArgument):
+            value = _format_number(argument.value)
+            return f"{value}°" if argument.unit == "degree" else f"({value} rad)"
+        if isinstance(argument, PointArgument):
+            coordinates = [argument.x, argument.y]
+            if argument.z is not None:
+                coordinates.append(argument.z)
+            return f"({', '.join(_format_number(value) for value in coordinates)})"
+        if isinstance(argument, VectorArgument):
+            coordinates = [argument.x, argument.y]
+            if argument.z is not None:
+                coordinates.append(argument.z)
+            serialized = ", ".join(_format_number(value) for value in coordinates)
+            return f"Vector(({serialized}))"
+        if isinstance(argument, TextArgument):
+            return f'"{_escape_text(argument.value)}"'
+        if isinstance(argument, BooleanArgument):
+            return "true" if argument.value else "false"
+        if isinstance(argument, ExpressionArgument):
+            return argument.value
+        if isinstance(argument, EquationArgument):
+            return f"({argument.value})"
+        if isinstance(argument, ListArgument):
+            return "{" + ", ".join(
+                self.serialize_argument(item) for item in argument.items
+            ) + "}"
+        if isinstance(argument, IntervalArgument):
+            left = "≤" if argument.lower_inclusive else "<"
+            right = "≤" if argument.upper_inclusive else "<"
+            return (
+                f"({_format_number(argument.lower)} {left} x {right} "
+                f"{_format_number(argument.upper)})"
+            )
+        raise TypeError(f"Unsupported GeoGebra argument type: {type(argument)!r}")

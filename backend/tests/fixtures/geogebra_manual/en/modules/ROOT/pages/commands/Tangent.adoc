@@ -1,0 +1,4 @@
+= Tangent Command
+
+Tangent( <Point>, <Conic> )::
+  Creates a tangent through the point.

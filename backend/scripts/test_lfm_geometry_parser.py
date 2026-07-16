@@ -11,15 +11,18 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from app.integrations.llama_client import LlamaClient
-from app.integrations.openrouter_client import OpenRouterClient
-from app.services.geogebra_translator import GeoGebraTranslator
-from app.schemas.common import ProblemType
-from app.schemas.geometry_dsl import GeometryDSL
-from app.services.geometry_extractor import (
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from app.integrations.llama_client import LlamaClient  # noqa: E402
+from app.schemas.common import ProblemType  # noqa: E402
+from app.schemas.geometry_dsl import GeometryDSL, ValidationSeverity  # noqa: E402
+from app.services.geogebra_translator import GeoGebraTranslator  # noqa: E402
+from app.services.geometry_extractor import (  # noqa: E402
     LOCAL_GEOMETRY_EXTRACTION_PROMPT,
-    LOCAL_GEOMETRY_RESPONSE_SCHEMA,
     GeometryExtractor,
+    geometry_response_schema,
 )
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
@@ -78,8 +81,7 @@ async def run_smoke_tests(
     client.settings.local_llama_geometry_timeout_seconds = request_timeout
     client.settings.local_llama_geometry_max_tokens = 1_200
 
-
-    extractor = GeometryExtractor(OpenRouterClient(), client, client.settings)
+    extractor = GeometryExtractor(client, settings=client.settings)
     translator = GeoGebraTranslator()
 
     failures: list[str] = []
@@ -98,15 +100,31 @@ async def run_smoke_tests(
                 print(f"  {command}")
             if translation.issues:
                 failures.append(
-                    f"{prompt}: translation issues: {'; '.join(translation.issues)}"
+                    f"{prompt}: translation issues: {'; '.join(translation.issue_messages)}"
                 )
             continue
 
+        classification = extractor.classify_visualization(prompt)
+        environment = classification.environment
+        if environment is None:
+            failure = f"Prompt is not visualizable: {classification.reason}"
+            failures.append(f"{prompt}: {failure}")
+            print(f"\n[{index}/{len(SMOKE_TEST_PROMPTS)}] {prompt}")
+            print(f"FAILED: {failure}")
+            continue
+
+        retrieved = tuple(extractor.registry.search(prompt, environment, limit=10))
+        command_names = [command.name for command in retrieved]
+        command_context = extractor._format_command_context(retrieved)
         payload = await client.generate_json(
-            prompt=f"{LOCAL_GEOMETRY_EXTRACTION_PROMPT}\n\nProblem:\n{prompt}",
+            prompt=(
+                f"{LOCAL_GEOMETRY_EXTRACTION_PROMPT}\n\n"
+                f"Selected environment: {environment.value}\n"
+                f"Retrieved generic commands:\n{command_context}\n\nProblem:\n{prompt}"
+            ),
             max_tokens=client.settings.local_llama_geometry_max_tokens,
             timeout_seconds=request_timeout,
-            json_schema=LOCAL_GEOMETRY_RESPONSE_SCHEMA,
+            json_schema=geometry_response_schema(command_names, environment),
         )
         elapsed = time.monotonic() - started_at
 
@@ -117,7 +135,14 @@ async def run_smoke_tests(
 
         dsl = GeometryDSL.model_validate(payload.get("dsl", {}))
         dsl = extractor._sanitize_local_dsl(prompt, dsl)
-        issues = extractor._validate_local_dsl(dsl)
+        validation = extractor.validator.validate(
+            dsl, allowed_command_names=command_names
+        )
+        issues = [
+            issue.message
+            for issue in validation.issues
+            if issue.severity is ValidationSeverity.error
+        ]
         issues.extend(extractor._validate_intent_alignment(prompt, dsl))
         if issues:
             repair_prompt = (
@@ -133,14 +158,21 @@ async def run_smoke_tests(
                 prompt=repair_prompt,
                 max_tokens=client.settings.local_llama_geometry_max_tokens,
                 timeout_seconds=request_timeout,
-                json_schema=LOCAL_GEOMETRY_RESPONSE_SCHEMA,
+                json_schema=geometry_response_schema(command_names, environment),
             )
             print(f"Repair latency: {time.monotonic() - repair_started_at:.2f}s")
             print("Repaired model JSON:")
             print(json.dumps(payload, indent=2))
             dsl = GeometryDSL.model_validate(payload.get("dsl", {}))
             dsl = extractor._sanitize_local_dsl(prompt, dsl)
-            issues = extractor._validate_local_dsl(dsl)
+            validation = extractor.validator.validate(
+                dsl, allowed_command_names=command_names
+            )
+            issues = [
+                issue.message
+                for issue in validation.issues
+                if issue.severity is ValidationSeverity.error
+            ]
             issues.extend(extractor._validate_intent_alignment(prompt, dsl))
             if issues:
                 failure = "Invalid repaired geometry DSL: " + "; ".join(issues)
@@ -148,7 +180,7 @@ async def run_smoke_tests(
                 print(f"FAILED: {failure}")
                 continue
 
-        translation = translator.translate(dsl)
+        translation = translator.translate(dsl, allowed_command_names=command_names)
         print(f"Summary: {extractor._coerce_optional_string(payload.get('summary')) or '(none)'}")
         print("DSL:")
         print(json.dumps(dsl.model_dump(mode="json"), indent=2))
@@ -160,7 +192,7 @@ async def run_smoke_tests(
             for issue in translation.issues:
                 print(f"  - {issue}")
             failures.append(
-                f"{prompt}: translation issues: {'; '.join(translation.issues)}"
+                f"{prompt}: translation issues: {'; '.join(translation.issue_messages)}"
             )
 
     if failures:

@@ -149,6 +149,8 @@ class LocalSolverSelector:
             return False
         if not getattr(self.llama_client, "enabled", False):
             return False
+        if not getattr(self.llama_client, "available", True):
+            return False
 
         stripped = text.strip()
         return 3 <= len(stripped) <= 1_000
@@ -156,7 +158,10 @@ class LocalSolverSelector:
     async def _detect_with_llama(self, text: str) -> LocalSolveDetection | None:
         prompt = f"{LOCAL_SOLVER_DETECTION_PROMPT}\n\nProblem:\n{text}"
         try:
-            payload = await self.llama_client.generate_json(prompt=prompt)
+            payload = await self.llama_client.generate_json(
+                prompt=prompt,
+                operation="local_solver_detection",
+            )
         except Exception:
             return None
 

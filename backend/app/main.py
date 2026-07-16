@@ -13,8 +13,10 @@ from app.db.models.problem_attempt import ProblemAttempt  # noqa: F401
 from app.db.models.solver_run import SolverRun  # noqa: F401
 from app.db.models.visualization_artifact import VisualizationArtifact  # noqa: F401
 from app.db.session import engine
+from app.integrations.llama_client import LlamaClient
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +27,19 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Startup: create all tables if they don't exist
+    # Startup: create all tables if they don't exist.
     Base.metadata.create_all(bind=engine)
+    if settings.local_llama_enabled:
+        llama_client = LlamaClient()
+        available = await llama_client.probe_health(
+            timeout_seconds=settings.local_llama_startup_probe_timeout_seconds
+        )
+        if not available:
+            logger.warning(
+                "Local llama.cpp is configured but unavailable at startup base_url=%s; "
+                "local model stages will be skipped during the connectivity cooldown",
+                settings.local_solver_llama_base_url,
+            )
     yield
     # Shutdown: nothing to tear down for SQLite; pool is closed by GC
 

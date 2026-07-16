@@ -2,21 +2,69 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.schemas.common import Difficulty, ProblemType
 
 if TYPE_CHECKING:
     from app.integrations.llama_client import LlamaClient
 
-EASY_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
-HARD_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+EASY_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
+HARD_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 JSON_SECONDARY_FALLBACK_MODEL = EASY_MODEL
-JSON_FALLBACK_MODEL = "openrouter/free"
+NVIDIA_NEMOTRON_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+NVIDIA_GPT_OSS_120B_MODEL = "openai/gpt-oss-120b"
+NVIDIA_NEMOTRON_NANO_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
+NVIDIA_GPT_OSS_20B_MODEL = "openai/gpt-oss-20b"
+NVIDIA_DIRECT_FALLBACK_MODELS = (
+    NVIDIA_NEMOTRON_SUPER_MODEL,
+    NVIDIA_GPT_OSS_120B_MODEL,
+    NVIDIA_NEMOTRON_NANO_MODEL,
+    NVIDIA_GPT_OSS_20B_MODEL,
+)
+NVIDIA_GPT_OSS_MODELS = frozenset(
+    {NVIDIA_GPT_OSS_120B_MODEL, NVIDIA_GPT_OSS_20B_MODEL}
+)
+NVIDIA_LARGE_MODELS = frozenset(
+    {NVIDIA_NEMOTRON_SUPER_MODEL, NVIDIA_GPT_OSS_120B_MODEL}
+)
+NVIDIA_DIRECT_ROUTING_PREFIX = "nvidia-direct:"
 LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
 LOCAL_LLAMA_GEOMETRY_PARSER_MODEL = "local:llama-geometry-parser"
 LOCAL_LLAMA_TRIVIA_MODEL = "local:llama-trivia"
 VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
+
+
+@dataclass(frozen=True)
+class StructuredModelEndpoint:
+    provider: Literal["nvidia_direct"]
+    model: str
+    routing_model: str
+
+
+def structured_model_endpoints(preferred_model: str) -> tuple[StructuredModelEndpoint, ...]:
+    if preferred_model not in {EASY_MODEL, HARD_MODEL}:
+        raise ValueError(f"Unsupported structured solver model: {preferred_model}")
+    alternate_model = EASY_MODEL if preferred_model == HARD_MODEL else HARD_MODEL
+    ordered_models = (preferred_model, alternate_model, *NVIDIA_DIRECT_FALLBACK_MODELS)
+    return tuple(
+        StructuredModelEndpoint(
+            provider="nvidia_direct",
+            model=native_model,
+            routing_model=f"{NVIDIA_DIRECT_ROUTING_PREFIX}{native_model}",
+        )
+        for native_model in dict.fromkeys(ordered_models)
+    )
+
+
+def remote_model_timeout_seconds(
+    settings: Any, *, provider: str, model: str
+) -> float:
+    if provider == "nvidia_direct" and model in NVIDIA_LARGE_MODELS:
+        return float(
+            getattr(settings, "nvidia_large_model_attempt_timeout_seconds", 50.0)
+        )
+    return float(getattr(settings, "remote_model_attempt_timeout_seconds", 25.0))
 
 ROUTER_CLASSIFICATION_PROMPT = """
 You are IntoMath's strict math problem router.
@@ -25,6 +73,7 @@ Return exactly one JSON object and nothing else.
 Classify the problem into exactly one problem_type:
 - arithmetic
 - algebra
+- number_theory
 - geometry
 - trigonometry
 - calculus
@@ -40,6 +89,7 @@ Also assess difficulty as exactly one of:
 Guidelines:
 - Use geometry for Euclidean construction/proof/theorem problems, including coordinate or analytic geometry.
 - Use algebra for equations, inequalities, simplification, factoring, symbolic manipulation, graphing functions, domains/ranges, vertices, intercepts, or y=/f(x)= style function analysis.
+- Use number_theory for divisibility, gcd/lcm, primes, congruences, Diophantine equations, or statements quantified over integers.
 - Use arithmetic for numeric-only calculations.
 - Use hard for proofs, multi-step theorem reasoning, long multi-part prompts, or advanced topics.
 - Use medium for graph/function/statistics/trigonometry/calculus prompts unless they are clearly advanced or proof-like.
@@ -127,6 +177,8 @@ class ModelRouter:
         llama_client = self._get_llama_client()
         if llama_client is None or not getattr(llama_client, "enabled", False):
             return None
+        if not getattr(llama_client, "available", True):
+            return None
 
         stripped = text.strip()
         if not stripped:
@@ -140,7 +192,10 @@ class ModelRouter:
 
         prompt = f"{ROUTER_CLASSIFICATION_PROMPT}\n\nProblem:\n{stripped}"
         try:
-            payload = await llama_client.generate_json(prompt=prompt)
+            payload = await llama_client.generate_json(
+                prompt=prompt,
+                operation="local_route_classification",
+            )
         except Exception:
             return None
 
@@ -189,6 +244,8 @@ class ModelRouter:
     def _infer_problem_type_from_structure(self, text: str) -> ProblemType:
         if self._has_function_assignment(text):
             return ProblemType.algebra
+        if self._has_number_theory_structure(text):
+            return ProblemType.number_theory
         if self._has_coordinate_structure(text):
             return ProblemType.geometry
         if self._has_geometry_structure(text):
@@ -212,6 +269,14 @@ class ModelRouter:
             return Difficulty.hard
         if problem_type is ProblemType.geometry:
             if len(self._point_labels(text)) >= 5:
+                return Difficulty.hard
+            return Difficulty.medium
+        if problem_type is ProblemType.number_theory:
+            if re.search(
+                r"\b(determine|find)\s+all\b|\bfor\s+all\b|\bthere\s+exist",
+                text,
+                flags=re.IGNORECASE,
+            ):
                 return Difficulty.hard
             return Difficulty.medium
         if len(text.split()) > 30:
@@ -263,6 +328,23 @@ class ModelRouter:
         return bool(
             re.search(r"\\(?:sin|cos|tan)\b", text)
             or re.search(r"\b(?:sin|cos|tan)\s*\(", text, re.IGNORECASE)
+        )
+
+    def _has_number_theory_structure(self, text: str) -> bool:
+        if re.search(
+            r"\b(?:gcd|lcm|prime|coprime|divisibility|divisible|divides|"
+            r"diophantine|congruen(?:ce|t)|modulo)\b|(?:^|\s)\\?gcd\s*\(",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return True
+        return bool(
+            re.search(r"\b(?:positive\s+)?integers?\b", text, re.IGNORECASE)
+            and re.search(
+                r"\b(?:determine|find)\s+all\b|\bfor\s+all\b|\bthere\s+exist",
+                text,
+                flags=re.IGNORECASE,
+            )
         )
 
     def _has_variable_relation(self, text: str) -> bool:

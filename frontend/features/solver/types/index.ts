@@ -25,6 +25,9 @@ export interface SolvePart {
 export interface GeometryAction {
   action: string;
   label?: string | null;
+  output?: string | null;
+  command?: string | null;
+  arguments?: GeoGebraArgument[];
   points?: string[];
   coordinates?: [number, number] | null;
   center?: string | null;
@@ -34,10 +37,81 @@ export interface GeometryAction {
   line?: string | null;
 }
 
+export type VisualizationEnvironment =
+  | "geometry_2d"
+  | "graphing"
+  | "graphics_3d"
+  | "cas"
+  | "probability"
+  | "statistics"
+  | "spreadsheet";
+
+export type GeoGebraArgument =
+  | { kind: "reference"; value: string }
+  | { kind: "number"; value: number }
+  | { kind: "angle"; value: number; unit: "degree" | "radian" }
+  | { kind: "point"; x: number; y: number; z?: number | null }
+  | { kind: "vector"; x: number; y: number; z?: number | null }
+  | { kind: "text"; value: string }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "expression"; value: string }
+  | { kind: "equation"; value: string }
+  | { kind: "list"; items: GeoGebraArgument[] }
+  | {
+      kind: "interval";
+      lower: number;
+      upper: number;
+      lower_inclusive: boolean;
+      upper_inclusive: boolean;
+    };
+
+export interface GeoGebraObjectStyle {
+  label: string;
+  color?: string | null;
+  line_thickness?: number | null;
+  line_style?: number | null;
+  point_size?: number | null;
+  label_visible?: boolean | null;
+  visible?: boolean | null;
+  fixed?: boolean | null;
+  caption?: string | null;
+}
+
+export interface GeoGebraRenderHints {
+  perspective?: VisualizationEnvironment | null;
+  styles?: GeoGebraObjectStyle[];
+  viewport?: {
+    x_min?: number | null;
+    x_max?: number | null;
+    y_min?: number | null;
+    y_max?: number | null;
+    z_min?: number | null;
+    z_max?: number | null;
+    axes_visible?: boolean | null;
+    grid_visible?: boolean | null;
+  } | null;
+  interaction?: {
+    movable_points?: string[];
+    animated_objects?: string[];
+    animation?: "start" | "stop" | null;
+  } | null;
+}
+
 export interface GeometryDsl {
   version: string;
+  space?: "euclidean_2d" | "euclidean_3d";
+  environment?: VisualizationEnvironment;
   actions: GeometryAction[];
-  render_hints?: Record<string, unknown>;
+  render_hints?: GeoGebraRenderHints;
+}
+
+export interface GeoGebraValidationIssue {
+  code: string;
+  action_index?: number | null;
+  command?: string | null;
+  output_label?: string | null;
+  message: string;
+  severity: "error" | "warning";
 }
 
 export interface SolveVisualization {
@@ -47,6 +121,15 @@ export interface SolveVisualization {
   geogebra?: {
     commands: string[];
     command_string: string;
+    validation_passed?: boolean;
+    issues?: string[];
+    validation_issues?: GeoGebraValidationIssue[];
+    environment?: VisualizationEnvironment;
+    retrieved_commands?: Array<{
+      name: string;
+      score: number;
+      signatures: string[];
+    }>;
   } | null;
 }
 

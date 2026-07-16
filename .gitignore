@@ -5,6 +5,8 @@ backend/.venv/
 .pytest_cache/
 backend/*.db
 backend/*.sqlite3
+.venv
+.venv-local
 
 # Frontend / Bun
 frontend/node_modules/

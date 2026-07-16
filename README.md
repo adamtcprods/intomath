@@ -15,7 +15,7 @@ Students can type a prompt and receive:
 - hints and common mistakes
 - an interactive GeoGebra visualization when the backend can generate one
 
-Image upload is available for configured OCR/model backends. For supported typed prompts, the backend now tries the local deterministic solver first, even when `OPENROUTER_API_KEY` is configured. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. A local llama.cpp model can normalize borderline prompts and extract validated visualization DSL, while proof-style geometry stays on model-backed routing.
+Image upload uses local OCR. For supported typed prompts, the backend tries the local deterministic solver first. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. A local llama.cpp model can normalize borderline prompts and extract validated visualization DSL, while proof-style geometry can use NVIDIA NIM routing.
 
 ## Tech stack
 
@@ -35,7 +35,7 @@ Image upload is available for configured OCR/model backends. For supported typed
 - Python 3.12+
 - Pydantic v2
 - SQLAlchemy
-- OpenRouter API
+- NVIDIA NIM API
 
 ### Database
 - PostgreSQL-ready via SQLAlchemy
@@ -93,21 +93,23 @@ Current models and local routes:
 - **Deterministic local solving first:** `local:deterministic-solver`
 - **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF` (`UD-Q4_K_XL`) through llama-server with JSON-schema constraints
 - **Local routing and solver normalization:** the same llama.cpp model
-- **Easy / lower-latency solving via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`
-- **Hard / proof-heavy solving via OpenRouter:** `nvidia/nemotron-3-super-120b-a12b:free`
-- **JSON fallback routing via OpenRouter:** `nvidia/nemotron-3-nano-30b-a3b:free`, then `openrouter/free`
+- **Easy / lower-latency solving via NVIDIA NIM:** `nvidia/nemotron-3-nano-30b-a3b`
+- **Hard / proof-heavy solving via NVIDIA NIM:** `nvidia/nemotron-3-super-120b-a12b`
+- **Explicit JSON fallback routing:** NVIDIA-native Nemotron and gpt-oss models with no opaque router alias
 - **OCR / visual extraction locally:** `deepseek-ai/deepseek-ocr-2`
 
 Examples:
 - supported arithmetic → `local:deterministic-solver`
 - supported linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
 - supported quadratic graphs → `local:deterministic-solver`
-- geometry proofs → `nvidia/nemotron-3-super-120b-a12b:free`
-- proof-style calculus → `nvidia/nemotron-3-super-120b-a12b:free`
+- geometry proofs → `nvidia/nemotron-3-super-120b-a12b`
+- proof-style calculus → `nvidia/nemotron-3-super-120b-a12b`
 - image input → OCR first, then local deterministic solving when supported, otherwise normal model routing
 
-### 3. Geometry DSL
-The model is not allowed to emit arbitrary GeoGebra syntax.
+### 3. Catalog-driven GeoGebra DSL
+The model is not allowed to emit arbitrary GeoGebra syntax. DSL `1.0` remains
+accepted for cached high-level actions; DSL `1.1` adds a typed generic
+`EXECUTE_COMMAND` action for the tested command-family rollout.
 
 Instead, visualization intent is represented as structured actions such as:
 - `CREATE_POINT`
@@ -120,6 +122,21 @@ Instead, visualization intent is represented as structured actions such as:
 - `PARALLEL`
 - `ANGLE_BISECTOR`
 - `CREATE_FUNCTION`
+- `EXECUTE_COMMAND`
+
+Generic command arguments use discriminated kinds: `reference`, `number`,
+`angle`, `point`, `vector`, `text`, `boolean`, `expression`, `equation`, `list`,
+and `interval`. IntoMath classifies the visualization environment, retrieves a
+small relevant command set from the local registry, validates signatures,
+types and dependencies, and only then translates it. The full catalog is never
+placed in a model prompt.
+
+The production rollout currently covers the existing high-level actions plus
+the core 2D generic set (points/lines/circles/conics, intersections,
+transformations, tangents, and common measurements). Catalog presence alone is
+not a support claim. Graphing retains the deterministic `CREATE_FUNCTION` path;
+advanced geometry, calculus, statistics/probability, 3D, CAS, and spreadsheet
+families remain gated pending family-specific signature and web-runtime tests.
 
 ### 4. Deterministic translation
 `backend/app/services/geogebra_translator.py` converts DSL actions into GeoGebra commands in code.
@@ -141,7 +158,21 @@ becomes:
 c = Circle(O, 5.0)
 ```
 
-This keeps constructions stable and auditable.
+This keeps constructions stable and auditable. The browser executes commands
+sequentially, treats GeoGebra's boolean `evalCommand` result as authoritative,
+stops on failure, restores the pre-run XML snapshot when possible, and shows
+the failed command. Browser JavaScript execution is disabled.
+
+### GeoGebra command source
+
+GeoGebra command definitions are derived from the official GeoGebra manual.
+The manual is not vendored in this repository. See:
+https://github.com/geogebra/manual/tree/main/en/modules/ROOT/pages/commands
+
+`backend/geogebra_commands.json` is a pinned, development-time generated
+artifact (currently 502 command names and 1,052 overloads). Runtime startup and
+requests use only this local registry and never fetch GitHub. Regeneration is
+documented in `docs/SETUP.md`.
 
 ## Database tables
 
@@ -186,10 +217,11 @@ Backend default URL: `http://localhost:8000`
 - `APP_NAME`
 - `APP_ENV`
 - `APP_DEBUG`
-- `OPENROUTER_API_KEY`
-- `OPENROUTER_BASE_URL`
-- `OPENROUTER_APP_NAME`
-- `OPENROUTER_SITE_URL`
+- `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS` — defaults to `25.0`; hard per-attempt remote timeout
+- `NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS` — defaults to `50.0`; applies only to direct Nemotron Super and gpt-oss-120b cold starts
+- `NVIDIA_API_KEY` — NVIDIA NIM API key for remote model-backed solving
+- `NVIDIA_DIRECT_ENABLED` — defaults to `true`; active when `NVIDIA_API_KEY` is configured
+- `NVIDIA_BASE_URL` — defaults to `https://integrate.api.nvidia.com/v1`
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `LOCAL_SOLVER_FIRST` — defaults to `true`; tries deterministic solving before model-backed solving
@@ -200,6 +232,8 @@ Backend default URL: `http://localhost:8000`
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
 - `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `unsloth/LFM2.5-8B-A1B-GGUF`
 - `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `20.0`
+- `LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS` — defaults to `1.0`; bounds the startup `/health` probe
+- `LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS` — defaults to `60.0`; skips repeated dead local hops after a connectivity failure
 - `LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS` — defaults to `30.0`
 - `LOCAL_LLAMA_GEOMETRY_MAX_TOKENS` — defaults to `1200`
 
@@ -209,6 +243,7 @@ Recommended checks:
 - `python3 -m compileall backend/app backend/tests`
 - `.venv-local/bin/pytest backend/tests`
 - `bun run --cwd frontend typecheck`
+- `bun test --cwd frontend`
 - `bun run --cwd frontend build`
 
 The frontend commands require Bun and installed frontend dependencies.

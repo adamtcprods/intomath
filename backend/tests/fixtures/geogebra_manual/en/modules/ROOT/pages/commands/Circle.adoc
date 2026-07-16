@@ -1,0 +1,12 @@
+= Circle Command
+
+Circle( <Point>, <Radius Number> )::
+  Yields a circle with a center and radius.
+
+Circle( <Point>, <Point>, <Point> )::
+  Yields a circle through three points.
+
+[EXAMPLE]
+====
+`++Circle((0, 0), 2)++` creates a circle.
+====

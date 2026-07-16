@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 
 from app.integrations.local_deepseek_ocr import LocalDeepSeekOCR
-from app.integrations.openrouter_client import OpenRouterClient
 
 
 @dataclass
@@ -16,8 +15,7 @@ class OCRResult:
 
 
 class OCRService:
-    def __init__(self, client: OpenRouterClient) -> None:
-        self.client = client
+    def __init__(self) -> None:
         self.local_ocr = LocalDeepSeekOCR()
 
     async def extract_problem_text(

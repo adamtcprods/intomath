@@ -15,10 +15,13 @@ class Settings(BaseSettings):
     app_name: str = "IntoMath 2.0 API"
     app_env: str = "development"
     app_debug: bool = True
-    openrouter_api_key: str | None = None
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_app_name: str = "IntoMath 2.0"
-    openrouter_site_url: str = "http://localhost:3000"
+    remote_model_attempt_timeout_seconds: float = Field(default=25.0, gt=0, le=120)
+    nvidia_large_model_attempt_timeout_seconds: float = Field(
+        default=50.0, gt=0, le=120
+    )
+    nvidia_api_key: str | None = None
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_direct_enabled: bool = True
     deepseek_ocr_model_id: str = "deepseek-ai/deepseek-ocr-2"
     local_solver_first: bool = True
     local_llama_enabled: bool = True
@@ -28,6 +31,8 @@ class Settings(BaseSettings):
     local_solver_llama_base_url: str = "http://localhost:8080"
     local_solver_llama_model: str = "unsloth/LFM2.5-8B-A1B-GGUF"
     local_solver_llama_timeout_seconds: float = 20.0
+    local_llama_startup_probe_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    local_llama_unavailable_cooldown_seconds: float = Field(default=60.0, gt=0, le=600)
     local_llama_geometry_timeout_seconds: float = 30.0
     local_llama_geometry_max_tokens: int = 1_200
     database_url: str = "sqlite:///./intomath.db"

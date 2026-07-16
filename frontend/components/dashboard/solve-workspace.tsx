@@ -66,9 +66,34 @@ export function SolveWorkspace() {
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
 
   const activePrompt = useMemo(() => input.trim(), [input]);
-  const commands = result?.visualization.geogebra?.commands ?? [];
-  const visualizationKey = useMemo(() => commands.join("\n"), [commands]);
+  const geogebra = result?.visualization.geogebra;
+  const commands = geogebra?.commands ?? [];
+  const visualizationEnvironment =
+    geogebra?.environment ??
+    result?.visualization.dsl?.environment ??
+    (result?.visualization.kind === "graph" ? "graphing" : "geometry_2d");
+  const renderHints = result?.visualization.dsl?.render_hints;
+  const visualizationKey = useMemo(
+    () =>
+      JSON.stringify({
+        commands,
+        environment: visualizationEnvironment,
+        renderHints,
+      }),
+    [commands, renderHints, visualizationEnvironment],
+  );
   const hasVisualization = commands.length > 0;
+  const warnings = result?.warnings ?? [];
+  const visualizationWarnings =
+    geogebra?.validation_passed === false &&
+    !warnings.some((warning) =>
+      warning.toLowerCase().includes("visualization plan failed validation"),
+    )
+      ? [
+          ...warnings,
+          "The model-generated visualization plan failed validation, so no shape could be constructed.",
+        ]
+      : warnings;
   const questionParts = result?.parts ?? [];
   const hasQuestionSwitcher = questionParts.length > 1;
   const safeActiveQuestionIndex = questionParts.length
@@ -369,14 +394,14 @@ export function SolveWorkspace() {
               </CardContent>
             </Card>
 
-            {result.warnings.length ? (
+            {visualizationWarnings.length ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
                 <p className="flex items-center gap-2 font-medium">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   Please note
                 </p>
                 <ul className="mt-2 space-y-1">
-                  {result.warnings.map((warning, index) => (
+                  {visualizationWarnings.map((warning, index) => (
                     <li key={`${warning}-${index}`}>• {warning}</li>
                   ))}
                 </ul>
@@ -550,7 +575,12 @@ export function SolveWorkspace() {
 
       {hasVisualization ? (
         <aside className="space-y-4 lg:col-span-2 xl:col-span-1 xl:sticky xl:top-24 xl:self-start">
-          <GeoGebraApplet key={visualizationKey} commands={commands} />
+          <GeoGebraApplet
+            commands={commands}
+            environment={visualizationEnvironment}
+            key={visualizationKey}
+            renderHints={renderHints}
+          />
         </aside>
       ) : null}
     </div>

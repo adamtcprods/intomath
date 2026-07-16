@@ -1,0 +1,65 @@
+[
+  {
+    "id": "core_circle_tangent",
+    "family": "core_geometry",
+    "status": "supported",
+    "prompt": "Draw circle c centered at A through B and its tangent at B.",
+    "allowed_commands": ["Tangent"],
+    "dsl": {
+      "version": "1.1",
+      "space": "euclidean_2d",
+      "environment": "geometry_2d",
+      "actions": [
+        {"action": "CREATE_POINT", "label": "A", "coordinates": [0, 0]},
+        {"action": "CREATE_POINT", "label": "B", "coordinates": [3, 0]},
+        {"action": "CREATE_CIRCLE", "label": "c", "through": ["A", "B"]},
+        {"action": "EXECUTE_COMMAND", "output": "t", "command": "Tangent", "arguments": [{"kind": "reference", "value": "B"}, {"kind": "reference", "value": "c"}]}
+      ],
+      "render_hints": {}
+    }
+  },
+  {
+    "id": "transform_rotate",
+    "family": "transformations",
+    "status": "supported",
+    "prompt": "Rotate A by 90 degrees around O.",
+    "allowed_commands": ["Rotate"],
+    "dsl": {
+      "version": "1.1",
+      "space": "euclidean_2d",
+      "environment": "geometry_2d",
+      "actions": [
+        {"action": "CREATE_POINT", "label": "A", "coordinates": [1, 0]},
+        {"action": "CREATE_POINT", "label": "O", "coordinates": [0, 0]},
+        {"action": "EXECUTE_COMMAND", "output": "rotatedA", "command": "Rotate", "arguments": [{"kind": "reference", "value": "A"}, {"kind": "angle", "value": 90, "unit": "degree"}, {"kind": "reference", "value": "O"}]}
+      ],
+      "render_hints": {}
+    }
+  },
+  {
+    "id": "measurement_distance",
+    "family": "measurements",
+    "status": "supported",
+    "prompt": "Measure the distance from A to B.",
+    "allowed_commands": ["Distance"],
+    "dsl": {
+      "version": "1.1",
+      "space": "euclidean_2d",
+      "environment": "geometry_2d",
+      "actions": [
+        {"action": "CREATE_POINT", "label": "A", "coordinates": [0, 0]},
+        {"action": "CREATE_POINT", "label": "B", "coordinates": [3, 4]},
+        {"action": "EXECUTE_COMMAND", "output": "d", "command": "Distance", "arguments": [{"kind": "reference", "value": "A"}, {"kind": "reference", "value": "B"}]}
+      ],
+      "render_hints": {}
+    }
+  },
+  {"id": "algebra_quadratic", "family": "algebra_graphing", "status": "legacy_high_level", "prompt": "Graph y=x^2-4x+3."},
+  {"id": "calculus_derivative", "family": "calculus", "status": "planned", "prompt": "Graph f and its derivative."},
+  {"id": "list_sequence", "family": "lists_sequences", "status": "planned", "prompt": "Plot the first ten terms of a sequence."},
+  {"id": "statistics_boxplot", "family": "statistics", "status": "planned", "prompt": "Create a box plot for this dataset."},
+  {"id": "probability_binomial", "family": "probability", "status": "planned", "prompt": "Show a binomial distribution."},
+  {"id": "geometry_locus", "family": "loci_advanced_geometry", "status": "planned", "prompt": "Construct the locus of M."},
+  {"id": "solid_sphere", "family": "graphics_3d", "status": "planned", "prompt": "Draw a sphere with center O and radius 3 in 3D."},
+  {"id": "symbolic_solve", "family": "cas", "status": "planned", "prompt": "Solve x^3-2x+1=0 exactly in CAS."}
+]

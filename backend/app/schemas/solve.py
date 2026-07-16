@@ -2,7 +2,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.schemas.geometry_dsl import GeometryDSL
+from app.schemas.geometry_dsl import (
+    GeoGebraValidationIssue,
+    GeometryDSL,
+    VisualizationEnvironment,
+)
 
 _SUPPORTED_IMAGE_MIME_TYPES = frozenset(
     ["image/jpeg", "image/png", "image/webp", "image/gif"]
@@ -167,7 +171,11 @@ class GeoGebraPayload(BaseModel):
     commands: list[str] = Field(default_factory=list)
     command_string: str = ""
     validation_passed: bool = True
+    # Kept for clients that already consume human-readable issue strings.
     issues: list[str] = Field(default_factory=list)
+    validation_issues: list[GeoGebraValidationIssue] = Field(default_factory=list)
+    environment: VisualizationEnvironment = VisualizationEnvironment.geometry_2d
+    retrieved_commands: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class VisualizationPayload(BaseModel):

@@ -92,13 +92,18 @@ class LlamaTriviaSolver:
 
         if not getattr(self.llama_client, "enabled", False):
             return None
+        if not getattr(self.llama_client, "available", True):
+            return None
 
         if self._should_skip(text, problem_type, difficulty):
             return None
 
         prompt = f"{LLAMA_TRIVIA_PROMPT}\n{text}"
         try:
-            payload = await self.llama_client.generate_json(prompt=prompt)
+            payload = await self.llama_client.generate_json(
+                prompt=prompt,
+                operation="local_trivia_solve",
+            )
         except Exception:
             return None
 

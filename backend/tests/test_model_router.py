@@ -16,3 +16,17 @@ def test_router_classifies_vietnamese_geometry_proof_as_hard() -> None:
     assert routing.problem_type is ProblemType.geometry
     assert routing.difficulty is Difficulty.hard
     assert routing.solver_model == HARD_MODEL
+
+
+def test_router_classifies_gcd_integer_problem_as_number_theory() -> None:
+    problem = (
+        "Determine all pairs (a, b) of positive integers for which there exist "
+        "positive integers g and N such that gcd(a^n+b, b^n+a) = g holds for "
+        "all integers n ≥ N."
+    )
+
+    routing = ModelRouter().route(problem, has_image=False)
+
+    assert routing.problem_type is ProblemType.number_theory
+    assert routing.difficulty is Difficulty.hard
+    assert routing.solver_model == HARD_MODEL
