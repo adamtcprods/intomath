@@ -388,7 +388,7 @@ class GeometryAction(BaseModel):
 class GeometryDSL(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    version: Literal["1.0", "1.1"] = "1.0"
+    version: Literal["1.1"] = "1.1"
     space: Literal["euclidean_2d", "euclidean_3d"] = "euclidean_2d"
     environment: VisualizationEnvironment = VisualizationEnvironment.geometry_2d
     actions: list[GeometryAction] = Field(
@@ -398,11 +398,6 @@ class GeometryDSL(BaseModel):
 
     @model_validator(mode="after")
     def validate_version_and_space(self) -> "GeometryDSL":
-        if self.version == "1.0" and any(
-            action.action is GeometryActionType.EXECUTE_COMMAND
-            for action in self.actions
-        ):
-            raise ValueError("EXECUTE_COMMAND requires DSL version 1.1.")
         if (
             self.environment is VisualizationEnvironment.graphics_3d
             and self.space != "euclidean_3d"

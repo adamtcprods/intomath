@@ -83,8 +83,8 @@ Primary structured solving endpoint.
   },
   "confidence": 0.92,
   "routing": {
-    "parser_model": "nvidia/nemotron-3-nano-30b-a3b:free",
-    "solver_model": "nvidia/nemotron-3-nano-30b-a3b:free",
+    "parser_model": "openai/gpt-oss-20b",
+    "solver_model": "openai/gpt-oss-20b",
     "vision_model": null,
     "reason": "classified as algebra; difficulty assessed as easy; kept on the lower-latency model"
   },
@@ -162,11 +162,12 @@ Each structured validation issue contains:
 }
 ```
 
-### Geometry DSL compatibility
+### Geometry DSL `1.1`
 
-DSL `1.0` high-level actions are still accepted so persisted/cached responses
-continue to render. DSL `1.1` adds `environment`, typed `render_hints`, and
-`EXECUTE_COMMAND`:
+DSL `1.1` is the only accepted visualization format. Every payload must declare
+`version`, `space`, `environment`, `actions`, and typed `render_hints`; explicit
+DSL `1.0` payloads are rejected. The existing high-level actions and
+`EXECUTE_COMMAND` are both represented in `1.1`:
 
 ```json
 {
@@ -221,19 +222,18 @@ If `include_visualization` is true:
 Remote solve and geometry requests supply strict JSON schemas in their prompts and
 validate each response locally. A provider failure is logged and
 warned separately from a model plan that parsed but failed deterministic validation.
-Geometry then tries the validated local llama.cpp parser, NVIDIA direct Nemotron Super,
-gpt-oss-120b, Nemotron Nano, and gpt-oss-20b in that order, then a limited deterministic
+Geometry then tries the validated local llama.cpp parser, NVIDIA direct gpt-oss-120b
+and gpt-oss-20b in that order, then a limited deterministic
 construction. Every proposed DSL—including NVIDIA direct output—runs through the same
 authoritative validators. Invalid output follows this chain too; it does not stop at an
 invalid but parseable DSL.
 
-Remote attempts have a 25-second default hard timeout. Only direct Nemotron Super and
-gpt-oss-120b receive a model-specific 50-second cold-start allowance. Structured solve
-tries the preferred and alternate explicit NVIDIA Nemotron models, then the remaining
-NVIDIA-native entries. NVIDIA calls
+Remote attempts have a 25-second default hard timeout. Only direct gpt-oss-120b
+receives a model-specific 50-second cold-start allowance. Structured solve tries the
+preferred and alternate explicit NVIDIA gpt-oss models. NVIDIA calls
 are non-streaming. Their hosted request contracts omit `response_format`, so responses
-are logged as unenforced proposals; Nemotron thinking is disabled and gpt-oss reasoning
-effort is low. Each structured step logs whether `latex` is empty; math notation
+are logged as unenforced proposals; gpt-oss reasoning effort is low. Each structured
+step logs whether `latex` is empty; math notation
 without a matching formula is surfaced in `warnings`. Scratch-work-style explanation
 fields receive at most one bounded cleanup turn on either provider path.
 

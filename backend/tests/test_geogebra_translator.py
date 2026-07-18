@@ -26,6 +26,33 @@ def test_translator_builds_basic_circle_commands() -> None:
     assert result.validation_passed is True
 
 
+def test_translator_separates_points_without_named_default_coordinates() -> None:
+    translator = GeoGebraTranslator()
+    dsl = GeometryDSL(
+        actions=[
+            GeometryAction(action=GeometryActionType.CREATE_POINT, label=label)
+            for label in ("W", "I", "T")
+        ]
+        + [
+            GeometryAction(
+                action=GeometryActionType.CREATE_POLYGON,
+                label="polyWIT",
+                points=["W", "I", "T"],
+            )
+        ]
+    )
+
+    result = translator.translate(dsl)
+
+    assert result.validation_passed is True
+    assert result.commands[:3] == [
+        "W = (-6.0, -3.0)",
+        "I = (-3.0, 2.0)",
+        "T = (0.0, -3.0)",
+    ]
+    assert result.commands[-1] == "polyWIT = Polygon(W, I, T)"
+
+
 def test_translator_reuses_intersection_points_in_construction() -> None:
     translator = GeoGebraTranslator()
     dsl = GeometryDSL(

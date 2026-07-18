@@ -54,7 +54,7 @@ export function LandingPage() {
                 explanation.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-4">
-                <Link href="/dashboard/solve">
+                <Link href="/solve">
                   <Button className="gap-2" size="lg">
                     Open solver
                     <ArrowRight className="h-4 w-4" />
@@ -82,7 +82,7 @@ export function LandingPage() {
                   <Link
                     className="group flex items-center justify-between gap-4 rounded-2xl border border-border/70 bg-background p-4 text-foreground/90 transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     href={{
-                      pathname: "/dashboard/solve",
+                      pathname: "/solve",
                       query: { prompt },
                     }}
                     key={prompt}
@@ -158,7 +158,7 @@ export function LandingPage() {
           <p className="mt-4 text-muted-foreground">
             Open the solver, ask one question, and focus on the steps.
           </p>
-          <Link className="mt-8 inline-flex" href="/dashboard/solve">
+          <Link className="mt-8 inline-flex" href="/solve">
             <Button className="gap-2" size="lg">
               Open solver
               <ArrowRight className="h-4 w-4" />

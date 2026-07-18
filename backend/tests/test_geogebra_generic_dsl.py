@@ -15,6 +15,15 @@ def _dsl(actions: list[dict], **extra: object) -> GeometryDSL:
     )
 
 
+def test_geometry_dsl_defaults_to_version_1_1() -> None:
+    assert GeometryDSL().version == "1.1"
+
+
+def test_geometry_dsl_rejects_version_1_0() -> None:
+    with pytest.raises(ValidationError):
+        GeometryDSL.model_validate({"version": "1.0", "actions": []})
+
+
 def test_generic_tangent_is_dependency_sorted_and_translated() -> None:
     dsl = _dsl(
         [

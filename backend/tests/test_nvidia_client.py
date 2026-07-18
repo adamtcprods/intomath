@@ -11,8 +11,6 @@ from app.integrations.nvidia_client import NvidiaClient
 from app.services.model_router import (
     NVIDIA_GPT_OSS_20B_MODEL,
     NVIDIA_GPT_OSS_120B_MODEL,
-    NVIDIA_NEMOTRON_NANO_MODEL,
-    NVIDIA_NEMOTRON_SUPER_MODEL,
 )
 
 
@@ -27,17 +25,14 @@ def _settings() -> SimpleNamespace:
 
 
 @pytest.mark.parametrize(
-    ("model", "family"),
+    "model",
     [
-        (NVIDIA_NEMOTRON_SUPER_MODEL, "nemotron"),
-        (NVIDIA_NEMOTRON_NANO_MODEL, "nemotron"),
-        (NVIDIA_GPT_OSS_120B_MODEL, "gpt_oss"),
-        (NVIDIA_GPT_OSS_20B_MODEL, "gpt_oss"),
+        NVIDIA_GPT_OSS_120B_MODEL,
+        NVIDIA_GPT_OSS_20B_MODEL,
     ],
 )
 def test_nvidia_payload_uses_family_controls_without_unsupported_response_format(
     model: str,
-    family: str,
 ) -> None:
     requests: list[dict[str, Any]] = []
 
@@ -77,14 +72,9 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
     assert payload["stream"] is False
     assert "response_format" not in payload
     assert "Required JSON schema" in payload["messages"][0]["content"]
-    if family == "gpt_oss":
-        assert payload["reasoning_effort"] == "low"
-        assert "chat_template_kwargs" not in payload
-        assert "reasoning_budget" not in payload
-    else:
-        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
-        assert payload["reasoning_budget"] == 64
-        assert "reasoning_effort" not in payload
+    assert payload["reasoning_effort"] == "low"
+    assert "chat_template_kwargs" not in payload
+    assert "reasoning_budget" not in payload
 
 
 def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:
@@ -99,7 +89,7 @@ def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:
     with pytest.raises(IntegrationRequestError) as exc_info:
         asyncio.run(
             client.complete_json(
-                model=NVIDIA_NEMOTRON_NANO_MODEL,
+                model=NVIDIA_GPT_OSS_20B_MODEL,
                 system_prompt="Return JSON.",
                 user_prompt="Test",
                 operation="geometry_extraction",
@@ -109,3 +99,73 @@ def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.response_body == error_body
+
+
+def test_nvidia_parser_prefers_complete_schema_object_over_earlier_fragment() -> None:
+    complete_payload = {
+        "answer": {"text": "The result is 180 degrees.", "latex": "180^\\circ"},
+        "steps": [],
+        "parts": [],
+        "confidence": 0.8,
+        "warnings": [],
+    }
+    content = (
+        'Draft fragment: {"text":"premature answer","latex":"180"}\n'
+        + json.dumps(complete_payload)
+    )
+    client = NvidiaClient(
+        _settings(),
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                request=request,
+                json={
+                    "model": NVIDIA_GPT_OSS_20B_MODEL,
+                    "choices": [{"message": {"content": content}}],
+                },
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        client.complete_json(
+            model=NVIDIA_GPT_OSS_20B_MODEL,
+            system_prompt="Return JSON.",
+            user_prompt="Test",
+            json_schema={
+                "type": "object",
+                "required": ["answer", "steps", "parts", "confidence", "warnings"],
+            },
+        )
+    )
+
+    assert result == complete_payload
+
+
+def test_nvidia_parser_reconstructs_schema_object_from_separate_fragments() -> None:
+    schema = {
+        "required": ["answer", "steps", "parts", "confidence", "warnings"],
+    }
+    content = "\n".join(
+        [
+            '{"answer":{"text":"Recovered proof","latex":"180^\\\\circ"}}',
+            '{"steps":[]}',
+            '{"parts":[]}',
+            '{"confidence":0.7}',
+            '{"warnings":[]}',
+        ]
+    )
+
+    result = NvidiaClient(_settings())._loads_json_response(
+        content,
+        model=NVIDIA_GPT_OSS_20B_MODEL,
+        json_schema=schema,
+    )
+
+    assert result == {
+        "answer": {"text": "Recovered proof", "latex": "180^\\circ"},
+        "steps": [],
+        "parts": [],
+        "confidence": 0.7,
+        "warnings": [],
+    }

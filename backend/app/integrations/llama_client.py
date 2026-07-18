@@ -242,6 +242,31 @@ class LlamaClient:
         )
         return payload
 
+    async def complete_json(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        json_schema: dict[str, Any] | None = None,
+        schema_name: str = "response",
+        timeout_seconds: float | None = None,
+        operation: str = "json_completion",
+        trace_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Adapt the shared structured-completion interface to llama-server."""
+        _ = (model, temperature, schema_name)
+        return await self.generate_json(
+            prompt=f"{system_prompt.strip()}\n\n{user_prompt.strip()}".strip(),
+            max_tokens=kwargs.get("max_tokens"),
+            timeout_seconds=timeout_seconds,
+            json_schema=json_schema,
+            operation=operation,
+            trace_id=trace_id,
+        )
+
     def _configured_base_url(self) -> str:
         return self.settings.local_solver_llama_base_url.rstrip("/")
 

@@ -91,25 +91,25 @@ The routing layer lives in `backend/app/services/model_router.py`.
 
 Current models and local routes:
 - **Deterministic local solving first:** `local:deterministic-solver`
-- **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF` (`UD-Q4_K_XL`) through llama-server with JSON-schema constraints
+- **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` through llama-server with JSON-schema constraints
 - **Local routing and solver normalization:** the same llama.cpp model
-- **Easy / lower-latency solving via NVIDIA NIM:** `nvidia/nemotron-3-nano-30b-a3b`
-- **Hard / proof-heavy solving via NVIDIA NIM:** `nvidia/nemotron-3-super-120b-a12b`
-- **Explicit JSON fallback routing:** NVIDIA-native Nemotron and gpt-oss models with no opaque router alias
+- **Easy / lower-latency solving via NVIDIA NIM:** `openai/gpt-oss-20b`
+- **Hard / proof-heavy solving via NVIDIA NIM:** `openai/gpt-oss-120b`
+- **Explicit JSON fallback routing:** NVIDIA-hosted gpt-oss models with no opaque router alias
 - **OCR / visual extraction locally:** `deepseek-ai/deepseek-ocr-2`
 
 Examples:
 - supported arithmetic → `local:deterministic-solver`
 - supported linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
 - supported quadratic graphs → `local:deterministic-solver`
-- geometry proofs → `nvidia/nemotron-3-super-120b-a12b`
-- proof-style calculus → `nvidia/nemotron-3-super-120b-a12b`
+- geometry proofs → `openai/gpt-oss-120b`
+- proof-style calculus → `openai/gpt-oss-120b`
 - image input → OCR first, then local deterministic solving when supported, otherwise normal model routing
 
 ### 3. Catalog-driven GeoGebra DSL
-The model is not allowed to emit arbitrary GeoGebra syntax. DSL `1.0` remains
-accepted for cached high-level actions; DSL `1.1` adds a typed generic
-`EXECUTE_COMMAND` action for the tested command-family rollout.
+The model is not allowed to emit arbitrary GeoGebra syntax. DSL `1.1` is the
+only accepted visualization format and includes both the existing high-level
+actions and the typed generic `EXECUTE_COMMAND` action.
 
 Instead, visualization intent is represented as structured actions such as:
 - `CREATE_POINT`
@@ -218,7 +218,7 @@ Backend default URL: `http://localhost:8000`
 - `APP_ENV`
 - `APP_DEBUG`
 - `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS` — defaults to `25.0`; hard per-attempt remote timeout
-- `NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS` — defaults to `50.0`; applies only to direct Nemotron Super and gpt-oss-120b cold starts
+- `NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS` — defaults to `50.0`; applies only to direct gpt-oss-120b cold starts
 - `NVIDIA_API_KEY` — NVIDIA NIM API key for remote model-backed solving
 - `NVIDIA_DIRECT_ENABLED` — defaults to `true`; active when `NVIDIA_API_KEY` is configured
 - `NVIDIA_BASE_URL` — defaults to `https://integrate.api.nvidia.com/v1`
@@ -230,7 +230,7 @@ Backend default URL: `http://localhost:8000`
 - `LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED` — defaults to `true`; enables the local concept/trivia fallback
 - `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; uses the local model to produce validated visualization DSL for local solve routes
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
-- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `unsloth/LFM2.5-8B-A1B-GGUF`
+- `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL`
 - `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `20.0`
 - `LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS` — defaults to `1.0`; bounds the startup `/health` probe
 - `LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS` — defaults to `60.0`; skips repeated dead local hops after a connectivity failure

@@ -137,6 +137,24 @@ class FallbackSolver:
         ]
         return answer, steps, 0.35, warnings
 
+    def detect_problem_type(self, text: str) -> ProblemType | None:
+        """Return the ProblemType if this solver can handle the text, else None."""
+        if self._try_linear_equation(text) is not None:
+            return ProblemType.algebra
+        if self._try_linear_graph(text) is not None:
+            return ProblemType.algebra
+        if self._try_quadratic_graph(text) is not None:
+            return ProblemType.algebra
+        if self._try_geometry_construction(text) is not None:
+            return ProblemType.geometry
+        if self._try_arithmetic(text) is not None:
+            return ProblemType.arithmetic
+        return None
+
+    def normalize_text(self, text: str) -> str:
+        """Public wrapper around text normalization."""
+        return self._normalize_text_for_matching(text)
+
     def _try_arithmetic(self, text: str) -> float | int | None:
         expression = self._extract_arithmetic_expression(text)
         if expression is None or not self._is_likely_valid_math_syntax(expression):

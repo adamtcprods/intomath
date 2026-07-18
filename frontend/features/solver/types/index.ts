@@ -98,11 +98,11 @@ export interface GeoGebraRenderHints {
 }
 
 export interface GeometryDsl {
-  version: string;
-  space?: "euclidean_2d" | "euclidean_3d";
-  environment?: VisualizationEnvironment;
+  version: "1.1";
+  space: "euclidean_2d" | "euclidean_3d";
+  environment: VisualizationEnvironment;
   actions: GeometryAction[];
-  render_hints?: GeoGebraRenderHints;
+  render_hints: GeoGebraRenderHints;
 }
 
 export interface GeoGebraValidationIssue {

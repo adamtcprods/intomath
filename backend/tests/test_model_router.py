@@ -1,5 +1,13 @@
 from app.schemas.common import Difficulty, ProblemType
-from app.services.model_router import HARD_MODEL, ModelRouter
+from types import SimpleNamespace
+
+from app.services.model_router import (
+    EASY_MODEL,
+    HARD_MODEL,
+    ModelRouter,
+    remote_model_timeout_seconds,
+    structured_model_endpoints,
+)
 
 VIETNAMESE_GEOMETRY_PROOF = r"""
 Cho tam giác (ABC) ((AB < AC)) nội tiếp đường tròn ((O;R)) có đường kính (BC).
@@ -30,3 +38,29 @@ def test_router_classifies_gcd_integer_problem_as_number_theory() -> None:
     assert routing.problem_type is ProblemType.number_theory
     assert routing.difficulty is Difficulty.hard
     assert routing.solver_model == HARD_MODEL
+
+
+def test_structured_endpoints_use_only_the_gpt_oss_models() -> None:
+    endpoints = structured_model_endpoints(HARD_MODEL)
+
+    assert [endpoint.model for endpoint in endpoints] == [HARD_MODEL, EASY_MODEL]
+
+
+def test_only_gpt_oss_120b_receives_the_large_model_timeout() -> None:
+    settings = SimpleNamespace(
+        remote_model_attempt_timeout_seconds=25.0,
+        nvidia_large_model_attempt_timeout_seconds=50.0,
+    )
+
+    assert (
+        remote_model_timeout_seconds(
+            settings, provider="nvidia_direct", model=HARD_MODEL
+        )
+        == 50.0
+    )
+    assert (
+        remote_model_timeout_seconds(
+            settings, provider="nvidia_direct", model=EASY_MODEL
+        )
+        == 25.0
+    )

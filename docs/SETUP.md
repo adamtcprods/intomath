@@ -38,6 +38,25 @@ python3 -m venv .venv-local
 .venv-local/bin/pip install -r backend/requirements.txt
 ```
 
+### Geometry DSL `1.1` artifact migration
+
+Before deploying the `1.1`-only visualization schema over an existing database,
+inspect persisted DSL `1.0` artifacts from the `backend` directory:
+
+```bash
+python scripts/migrate_geometry_dsl_1_1.py
+```
+
+The command is a dry run by default. Apply validated upgrades with:
+
+```bash
+python scripts/migrate_geometry_dsl_1_1.py --apply
+```
+
+Use `--database-url` to override `DATABASE_URL` and `--failure-report PATH` to
+export malformed artifact IDs and validation errors. The migration preserves
+stored GeoGebra commands and leaves invalid legacy DSL records unchanged.
+
 Run the API:
 
 ```bash
@@ -71,7 +90,7 @@ LOCAL_SOLVER_LLAMA_DETECTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED=true
 LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
-LOCAL_SOLVER_LLAMA_MODEL=unsloth/LFM2.5-8B-A1B-GGUF
+LOCAL_SOLVER_LLAMA_MODEL=unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL
 LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=20.0
 LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS=1.0
 LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS=60.0
@@ -92,9 +111,9 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
 IntoMath expects the following model policy:
 
 - supported deterministic solving first: `local:deterministic-solver`
-- easy solving via NVIDIA NIM: `nvidia/nemotron-3-nano-30b-a3b`
-- hard solving via NVIDIA NIM: `nvidia/nemotron-3-super-120b-a12b`
-- NVIDIA NIM fallback order: Nemotron Super, gpt-oss-120b, Nemotron Nano, gpt-oss-20b
+- easy solving via NVIDIA NIM: `openai/gpt-oss-20b`
+- hard solving via NVIDIA NIM: `openai/gpt-oss-120b`
+- NVIDIA NIM fallback order: gpt-oss-120b, gpt-oss-20b
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
 For local-first routing, normalization, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
@@ -118,7 +137,13 @@ dependency before running the API:
 
 ```bash
 curl --fail http://localhost:8080/health
+curl --fail http://localhost:8080/v1/models
 ```
+
+Set `LOCAL_SOLVER_LLAMA_MODEL` to the exact `id` reported by `/v1/models`. For the
+installed `LFM2.5-8B-A1B` Q4_K_XL model, use
+`unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL`; the repository name without `:Q4_K_XL` is not
+a valid OpenAI-compatible model ID.
 
 A connection-refused result means local routing and local geometry extraction are
 unavailable until `llama-server` is started. API startup now probes this health URL and
@@ -143,28 +168,25 @@ follows the same fallback chain.
 
 Structured solve candidates are explicit and ordered:
 
-1. `nvidia/nemotron-3-super-120b-a12b`
-2. `openai/gpt-oss-120b`
-3. `nvidia/nemotron-3-nano-30b-a3b`
-4. `openai/gpt-oss-20b`
+1. `openai/gpt-oss-120b`
+2. `openai/gpt-oss-20b`
 
-Geometry uses the same four-entry NVIDIA order after its local fallback. `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
+Geometry uses the same two-entry NVIDIA order after its local fallback. `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
 the hard budget for ordinary remote attempts.
-`NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0` applies only to direct Nemotron Super
-and gpt-oss-120b to allow for free-tier cold starts; Nano and gpt-oss-20b remain at 25s.
+`NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0` applies only to direct gpt-oss-120b
+to allow for free-tier cold starts; gpt-oss-20b remains at 25s.
 HTTP 429s are not hidden or retried inside an opaque SDK: logs include attempt number,
 model, provider, operation, request ID, status/body, and `failure_code=rate_limited`.
 Ordering should only change after those logs provide representative rate-limit data.
 
 Set `NVIDIA_API_KEY` to a key from build.nvidia.com. `NVIDIA_DIRECT_ENABLED=true`
 enables remote solving when the key is present. The published
-`ChatRequest` schemas on all four configured model pages are closed with
+`ChatRequest` schemas on both configured model pages are closed with
 `additionalProperties: false` and omit OpenAI's `response_format` field. The gpt-oss
 cards advertise Structured Output as a model capability, but NVIDIA's hosted Chat
 Completions contract still does not expose `json_schema`; the client therefore does not
 send an unsupported field or claim enforcement. Calls are complete and non-streaming.
-Nemotron uses `enable_thinking=false` with `reasoning_budget=64`; gpt-oss uses
-`reasoning_effort=low`. Every response remains an unenforced proposal subject to the
+gpt-oss uses `reasoning_effort=low`. Every response remains an unenforced proposal subject to the
 same strict local payload parser, deterministic geometry validator, and bounded repair
 loop. The local parser also records empty step-level `latex`, warns when math notation
 has no matching KaTeX expression, and sends scratch-work-style explanation fields

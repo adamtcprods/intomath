@@ -24,7 +24,7 @@ flowchart TD
     L --> F[Structured solve generation]
     E --> G[Geometry extraction]
     G --> H[Capability classification + bounded command retrieval]
-    H --> I[Typed Geometry DSL 1.0 / 1.1]
+    H --> I[Typed Geometry DSL 1.1]
     I --> V[Schema + signature + type + dependency validation]
     V --> T[Deterministic GeoGebra translator]
     F --> J[Structured response assembly]
@@ -143,15 +143,14 @@ Difficulty is then assessed separately:
 | Use case | Model / route |
 |---|---|
 | Supported arithmetic, linear equations, quadratic graphs, simple constructions | `local:deterministic-solver` |
-| Local routing, normalization, trivia, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF` (`UD-Q4_K_XL`) via llama-server; deterministic validation/fallback remains authoritative |
-| Easy algebra / arithmetic outside deterministic coverage | `nvidia/nemotron-3-nano-30b-a3b` via NVIDIA NIM |
-| Hard geometry / proofs / multi-step reasoning | `nvidia/nemotron-3-super-120b-a12b` via NVIDIA NIM |
-| Model fallback | NVIDIA NIM order: Nemotron Super → gpt-oss-120b → Nemotron Nano → gpt-oss-20b, with bounded family-specific reasoning and deterministic post-validation |
+| Local routing, normalization, trivia, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation/fallback remains authoritative |
+| Easy algebra / arithmetic outside deterministic coverage | `openai/gpt-oss-20b` via NVIDIA NIM |
+| Hard geometry / proofs / multi-step reasoning | `openai/gpt-oss-120b` via NVIDIA NIM |
+| Model fallback | NVIDIA NIM order: gpt-oss-120b → gpt-oss-20b, with bounded reasoning and deterministic post-validation |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |
 
-Structured-solve fallback order is explicit: the preferred and alternate NVIDIA
-Nemotron models, then NVIDIA NIM gpt-oss-120b and gpt-oss-20b. Geometry uses the same
-entries after the local llama safety net.
+Structured-solve fallback order is explicit: the preferred and alternate NVIDIA NIM
+gpt-oss models. Geometry uses the same entries after the local llama safety net.
 
 ## GeoGebra trust boundary
 
@@ -186,11 +185,11 @@ validate responses locally. Provider/schema unavailability is distinct from inva
 model output. Geometry falls through to the constrained local parser, the explicitly
 named NVIDIA NIM models, and finally the limited deterministic construction parser. The
 published closed NVIDIA `ChatRequest` schemas for these models omit `response_format`,
-so non-streaming output is explicitly treated as an unenforced proposal. Nemotron
-thinking is disabled; gpt-oss uses low reasoning effort. The same authoritative payload,
+so non-streaming output is explicitly treated as an unenforced proposal. gpt-oss uses
+low reasoning effort. The same authoritative payload,
 semantic, dependency, type, and allowlist validators run for every provider.
 
-## Geometry DSL versions
+## Geometry DSL `1.1`
 
 The DSL schema is defined in `backend/app/schemas/geometry_dsl.py`.
 
@@ -240,12 +239,12 @@ The DSL schema is defined in `backend/app/schemas/geometry_dsl.py`.
 - `CREATE_FUNCTION`
 - `EXECUTE_COMMAND`
 
-DSL `1.0` remains accepted and uses the existing high-level action fields.
-`EXECUTE_COMMAND` requires `1.1`; its output label is deliberately distinct
-from command arguments and from `label` on high-level actions. Generic commands
-may omit `output` only for a terminal result that will not be referenced later.
-The validator emits `untracked_output` as a warning, and GeoGebra may assign its
-own label.
+DSL `1.1` is the sole accepted visualization format. It supports the existing
+high-level action fields and `EXECUTE_COMMAND`; the latter's output label is
+deliberately distinct from command arguments and from `label` on high-level
+actions. Generic commands may omit `output` only for a terminal result that will
+not be referenced later. The validator emits `untracked_output` as a warning,
+and GeoGebra may assign its own label.
 
 Typed generic arguments are `reference`, `number`, `angle`, `point`, `vector`,
 `text`, `boolean`, `expression`, `equation`, `list`, and `interval`. Every kind

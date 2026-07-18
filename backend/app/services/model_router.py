@@ -1,32 +1,31 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from app.schemas.common import Difficulty, ProblemType
 
 if TYPE_CHECKING:
     from app.integrations.llama_client import LlamaClient
 
-EASY_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
-HARD_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+logger = logging.getLogger(__name__)
+
+EASY_MODEL = "openai/gpt-oss-20b"
+HARD_MODEL = "openai/gpt-oss-120b"
 JSON_SECONDARY_FALLBACK_MODEL = EASY_MODEL
-NVIDIA_NEMOTRON_SUPER_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 NVIDIA_GPT_OSS_120B_MODEL = "openai/gpt-oss-120b"
-NVIDIA_NEMOTRON_NANO_MODEL = "nvidia/nemotron-3-nano-30b-a3b"
 NVIDIA_GPT_OSS_20B_MODEL = "openai/gpt-oss-20b"
 NVIDIA_DIRECT_FALLBACK_MODELS = (
-    NVIDIA_NEMOTRON_SUPER_MODEL,
     NVIDIA_GPT_OSS_120B_MODEL,
-    NVIDIA_NEMOTRON_NANO_MODEL,
     NVIDIA_GPT_OSS_20B_MODEL,
 )
 NVIDIA_GPT_OSS_MODELS = frozenset(
     {NVIDIA_GPT_OSS_120B_MODEL, NVIDIA_GPT_OSS_20B_MODEL}
 )
 NVIDIA_LARGE_MODELS = frozenset(
-    {NVIDIA_NEMOTRON_SUPER_MODEL, NVIDIA_GPT_OSS_120B_MODEL}
+    {NVIDIA_GPT_OSS_120B_MODEL}
 )
 NVIDIA_DIRECT_ROUTING_PREFIX = "nvidia-direct:"
 LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
@@ -37,7 +36,7 @@ VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
 
 @dataclass(frozen=True)
 class StructuredModelEndpoint:
-    provider: Literal["nvidia_direct"]
+    provider: str
     model: str
     routing_model: str
 
@@ -197,6 +196,10 @@ class ModelRouter:
                 operation="local_route_classification",
             )
         except Exception:
+            logger.debug(
+                "Llama classification failed, falling back to structural",
+                exc_info=True,
+            )
             return None
 
         problem_type = self._coerce_problem_type(payload.get("problem_type"))
@@ -220,6 +223,7 @@ class ModelRouter:
         try:
             from app.integrations.llama_client import LlamaClient
         except Exception:
+            logger.debug("Failed to initialize LlamaClient", exc_info=True)
             return None
         self.llama_client = LlamaClient()
         return self.llama_client

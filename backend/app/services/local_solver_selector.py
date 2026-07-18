@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.core.config import get_settings
@@ -32,6 +33,8 @@ Do not solve the problem. Do not include the answer.
 JSON schema:
 {"use_local_solver": true, "normalized_prompt": "canonical supported prompt", "reason": "short reason"}
 """.strip()
+
+logger = logging.getLogger(__name__)
 
 
 class LocalSolverSelector:
@@ -163,6 +166,7 @@ class LocalSolverSelector:
                 operation="local_solver_detection",
             )
         except Exception:
+            logger.debug("Llama local solver detection failed", exc_info=True)
             return None
 
         return LocalSolveDetection(
@@ -174,17 +178,7 @@ class LocalSolverSelector:
         )
 
     def _infer_supported_problem_type(self, text: str) -> ProblemType | None:
-        if self.fallback_solver._try_linear_equation(text) is not None:
-            return ProblemType.algebra
-        if self.fallback_solver._try_linear_graph(text) is not None:
-            return ProblemType.algebra
-        if self.fallback_solver._try_quadratic_graph(text) is not None:
-            return ProblemType.algebra
-        if self.fallback_solver._try_geometry_construction(text) is not None:
-            return ProblemType.geometry
-        if self.fallback_solver._try_arithmetic(text) is not None:
-            return ProblemType.arithmetic
-        return None
+        return self.fallback_solver.detect_problem_type(text)
 
     def _coerce_bool(self, value: Any) -> bool:
         if isinstance(value, bool):

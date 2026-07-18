@@ -15,7 +15,7 @@ export function SiteFooter() {
           <p className="mb-3 font-medium text-foreground">Product</p>
           <div className="flex flex-col gap-2">
             <Link href="#features">Features</Link>
-            <Link href="/dashboard/solve">Solver</Link>
+            <Link href="/solve">Solver</Link>
           </div>
         </div>
         <div>

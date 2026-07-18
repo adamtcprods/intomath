@@ -21,6 +21,7 @@ from app.schemas.geometry_dsl import (
     GeometryActionType,
     GeometryDSL,
     GeoGebraValidationIssue,
+    RenderHints,
     ValidationSeverity,
     VisualizationEnvironment,
 )
@@ -41,9 +42,34 @@ logger = logging.getLogger(__name__)
 GEOMETRY_RETRIEVAL_LIMIT = 10
 
 
+_NAMED_TRIANGLE_PATTERNS = (
+    re.compile(
+        r"(?i:\btriangle\b|tam\s+gi(?:á|a)c)"
+        r"[\s\\()${}]*([A-Z])\s*([A-Z])\s*([A-Z])(?![A-Za-z])"
+    ),
+    re.compile(
+        r"(?<![A-Za-z])([A-Z])\s*([A-Z])\s*([A-Z])(?![A-Za-z])"
+        r"[\s\\()${}]*"
+        r"(?i:(?:is|be)\s+(?:a\s+)?triangle\b)"
+    ),
+)
+
+
+def _named_triangle_points(text: str) -> list[str] | None:
+    """Return explicit uppercase triangle labels without consuming prose words."""
+
+    for pattern in _NAMED_TRIANGLE_PATTERNS:
+        for match in pattern.finditer(text):
+            points = list(match.groups())
+            if len(set(points)) == 3:
+                return points
+    return None
+
+
 LOCAL_GEOMETRY_EXTRACTION_PROMPT = """
 Convert the math problem into a minimal GeoGebra construction plan.
 Return exactly one JSON object and nothing else. Do not solve or prove the problem.
+Use only the top-level keys summary and dsl. Keep summary at 200 characters or fewer.
 Do not invent coordinates, lengths, labels, or relationships that the problem does not give.
 Preserve labels exactly. References may be emitted out of order; trusted code will sort them.
 
@@ -683,11 +709,31 @@ class GeometryExtractor:
                 classification.capability.value,
                 classification.reason,
             )
-            return GeometryExtractionResult(dsl=GeometryDSL(), summary=None, warnings=[])
+            return GeometryExtractionResult(
+                dsl=GeometryDSL(
+                    version="1.1",
+                    space="euclidean_2d",
+                    environment=VisualizationEnvironment.geometry_2d,
+                    actions=[],
+                    render_hints=RenderHints(),
+                ),
+                summary=None,
+                warnings=[],
+            )
 
         environment = classification.environment
         if environment is None:  # Kept explicit for static type narrowing.
-            return GeometryExtractionResult(dsl=GeometryDSL(), summary=None, warnings=[])
+            return GeometryExtractionResult(
+                dsl=GeometryDSL(
+                    version="1.1",
+                    space="euclidean_2d",
+                    environment=VisualizationEnvironment.geometry_2d,
+                    actions=[],
+                    render_hints=RenderHints(),
+                ),
+                summary=None,
+                warnings=[],
+            )
         retrieved = tuple(
             command
             for command in self.registry.search(
@@ -906,8 +952,9 @@ class GeometryExtractor:
         payload = await selected_client.complete_json(
             model=parser_model,
             system_prompt=(
-                "Extract only visualization intents for a math problem. Output JSON with keys: "
-                "summary, dsl. Use DSL version 1.1 with version, space, environment, actions, render_hints. "
+                "Extract only visualization intents for a math problem. Output JSON with exactly the "
+                "top-level keys summary and dsl; keep summary at 200 characters or fewer. Use DSL "
+                "version 1.1 with version, space, environment, actions, render_hints. "
                 "Supported actions: CREATE_POINT, CREATE_LINE, CREATE_CIRCLE, CREATE_POLYGON, INTERSECT, "
                 "MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION, EXECUTE_COMMAND. "
                 "EXECUTE_COMMAND arguments must be typed objects and its command must appear in the "
@@ -1014,7 +1061,7 @@ class GeometryExtractor:
             repair_attempted=repair_attempted,
             repair_succeeded=repair_attempted and not errors and not semantic_issues,
         )
-        if errors or semantic_issues:
+        if errors or not dsl.actions:
             issue_codes = Counter(issue.code for issue in errors)
             if semantic_issues:
                 issue_codes["semantic_mismatch"] += len(semantic_issues)
@@ -1025,10 +1072,25 @@ class GeometryExtractor:
             )
 
         dsl.actions = list(validation.actions)
+        warnings: list[str] = []
+        if semantic_issues:
+            logger.warning(
+                "Remote geometry proposal accepted with incomplete intent alignment "
+                "request_id=%s model=%s environment=%s action_count=%s issue_count=%s",
+                request_id,
+                parser_model,
+                environment.value,
+                len(dsl.actions),
+                len(semantic_issues),
+            )
+            warnings.append(
+                "The interactive construction may omit some stated relationships: "
+                + " ".join(semantic_issues)
+            )
         return GeometryExtractionResult(
             dsl=dsl,
             summary=summary,
-            warnings=[],
+            warnings=warnings,
             allowed_commands=frozenset(allowed_command_names),
             retrieved_commands=retrieved,
         )
@@ -1313,6 +1375,8 @@ class GeometryExtractor:
                     else "euclidean_2d"
                 ),
                 environment=environment,
+                actions=[],
+                render_hints=RenderHints(),
             ),
             summary=None,
             warnings=[
@@ -1537,13 +1601,26 @@ class GeometryExtractor:
         source: str,
         allowed_command_names: set[str],
     ) -> tuple[GeometryDSL, str]:
-        if set(payload) != {"summary", "dsl"}:
+        required_payload_keys = {"summary", "dsl"}
+        if not required_payload_keys.issubset(payload):
+            nested_candidates = [
+                value
+                for value in payload.values()
+                if isinstance(value, dict)
+                and required_payload_keys.issubset(value)
+            ]
+            if len(nested_candidates) == 1:
+                payload = nested_candidates[0]
+        if not required_payload_keys.issubset(payload):
             raise ValueError(
-                f"{source} geometry response must contain exactly summary and dsl."
+                f"{source} geometry response must contain summary and dsl."
             )
         summary = payload.get("summary")
-        if not isinstance(summary, str) or len(summary) > 200:
-            raise ValueError(f"{source} geometry summary must be a string of at most 200 characters.")
+        if not isinstance(summary, str):
+            raise ValueError(f"{source} geometry summary must be a string.")
+        summary = summary.strip()
+        if len(summary) > 200:
+            summary = summary[:197].rstrip() + "..."
         raw_dsl = payload.get("dsl")
         if not isinstance(raw_dsl, dict):
             raise ValueError(f"{source} geometry dsl must be an object.")
@@ -1554,9 +1631,9 @@ class GeometryExtractor:
             "actions",
             "render_hints",
         }
-        if set(raw_dsl) != required_dsl_keys:
+        if not required_dsl_keys.issubset(raw_dsl):
             raise ValueError(
-                f"{source} geometry dsl must contain exactly the required version 1.1 fields."
+                f"{source} geometry dsl must contain the required version 1.1 fields."
             )
         expected_space = (
             "euclidean_3d"
@@ -1582,7 +1659,7 @@ class GeometryExtractor:
             )
             for action in raw_actions
         ]
-        strict_dsl = dict(raw_dsl)
+        strict_dsl = {key: raw_dsl[key] for key in required_dsl_keys}
         strict_dsl["actions"] = parsed_actions
         return GeometryDSL.model_validate(strict_dsl), summary.strip()
 
@@ -1665,10 +1742,9 @@ class GeometryExtractor:
         used_labels = {action.label for action in sanitized.actions if action.label}
 
         center_match = re.search(
-            rf"(?:circle\s+with\s+)?center\s+([A-Z])\s+at\s*"
+            rf"(?i:(?:circle\s+with\s+)?center)\s+([A-Z])\s+(?i:at)\s*"
             rf"\(\s*({number})\s*,\s*({number})\s*\)",
             text,
-            flags=re.IGNORECASE,
         )
         if center_match:
             center_label = center_match.group(1).upper()
@@ -1698,35 +1774,12 @@ class GeometryExtractor:
                         circle.label = self._unique_label("c", used_labels)
                         used_labels.add(circle.label)
 
-        triangle_candidates = [
-            re.search(
-                r"(?:triangle|tam\s+gi(?:á|a)c)\s*\(?([A-Z])([A-Z])([A-Z])\)?",
-                text,
-                flags=re.IGNORECASE,
-            ),
-            re.search(
-                r"\b([A-Z])([A-Z])([A-Z])\b.{0,20}\btriangle\b",
-                text,
-                flags=re.IGNORECASE,
-            ),
-        ]
-        triangle_match = next(
-            (
-                candidate
-                for candidate in triangle_candidates
-                if candidate
-                and all(
-                    label.upper() in created_points for label in candidate.groups()
-                )
-            ),
-            None,
-        )
+        triangle_points = _named_triangle_points(text)
         has_polygon = any(
             action.action is GeometryActionType.CREATE_POLYGON
             for action in sanitized.actions
         )
-        if triangle_match and not has_polygon:
-            triangle_points = [label.upper() for label in triangle_match.groups()]
+        if triangle_points and not has_polygon:
             if all(label in created_points for label in triangle_points):
                 polygon_label = self._unique_label(
                     "poly" + "".join(triangle_points), used_labels
@@ -1985,13 +2038,9 @@ class GeometryExtractor:
             )
             summary = "Interactive function graph"
 
-        triangle_match = re.search(
-            r"(?:triangle|tam\s+gi(?:á|a)c)\s*\(?([A-Z])([A-Z])([A-Z])\)?",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if triangle_match:
-            points = [point.upper() for point in triangle_match.groups()]
+        triangle_points = _named_triangle_points(text)
+        if triangle_points:
+            points = triangle_points
             for point in points:
                 actions.append(
                     GeometryAction(action=GeometryActionType.CREATE_POINT, label=point)
@@ -2006,9 +2055,10 @@ class GeometryExtractor:
             summary = summary or "Triangle construction"
 
         circle_match = re.search(
-            r"circle\s+(?:with|has)\s+center\s+([A-Z])(?:\s+at\s*\(([-\d.]+),\s*([-\d.]+)\))?(?:\s+and)?\s+radius\s*([-\d.]+)",
+            r"(?i:circle\s+(?:with|has)\s+center)\s+([A-Z])"
+            r"(?:\s+(?i:at)\s*\(([-\d.]+),\s*([-\d.]+)\))?"
+            r"(?:\s+(?i:and))?\s+(?i:radius)\s*([-\d.]+)",
             text,
-            flags=re.IGNORECASE,
         )
         if circle_match:
             center_label = circle_match.group(1).upper()
@@ -2036,9 +2086,9 @@ class GeometryExtractor:
         )
         if not has_circle:
             center_match = re.search(
-                r"(?:\(\(?\s*([A-Z])\s*[;,.]\s*R\s*\)?\)?|center\s+([A-Z]))",
+                r"(?:\(\(?\s*([A-Z])\s*[;,.]\s*(?i:R)\s*\)?\)?|"
+                r"(?i:\bcenter\b)\s+([A-Z])(?![A-Za-z]))",
                 text,
-                flags=re.IGNORECASE,
             )
             center_label = None
             if center_match:
@@ -2058,9 +2108,9 @@ class GeometryExtractor:
                     summary = summary or "Circle construction"
 
         explicit_point_pattern = re.finditer(
-            r"point\s+([A-Z])\s+(?:at|=)\s*\(([-\d.]+),\s*([-\d.]+)\)",
+            r"(?i:\bpoint)\s+([A-Z])\s+(?i:at|=)\s*"
+            r"\(([-\d.]+),\s*([-\d.]+)\)",
             text,
-            flags=re.IGNORECASE,
         )
         for match in explicit_point_pattern:
             actions.append(
@@ -2072,7 +2122,7 @@ class GeometryExtractor:
             )
 
         midpoint_match = re.search(
-            r"midpoint\s+of\s+([A-Z])([A-Z])", text, flags=re.IGNORECASE
+            r"(?i:\bmidpoint\s+of)\s+([A-Z])([A-Z])(?![A-Za-z])", text
         )
         if midpoint_match:
             p1, p2 = midpoint_match.group(1).upper(), midpoint_match.group(2).upper()
@@ -2089,7 +2139,9 @@ class GeometryExtractor:
 
         if "perpendicular bisector" in lowered:
             segment_match = re.search(
-                r"perpendicular bisector of\s+([A-Z])([A-Z])", text, flags=re.IGNORECASE
+                r"(?i:\bperpendicular\s+bisector\s+of)\s+"
+                r"([A-Z])([A-Z])(?![A-Za-z])",
+                text,
             )
             if segment_match:
                 p1, p2 = segment_match.group(1).upper(), segment_match.group(2).upper()
@@ -2131,6 +2183,7 @@ class GeometryExtractor:
 
         return GeometryExtractionResult(
             dsl=GeometryDSL(
+                version="1.1",
                 space=(
                     "euclidean_3d"
                     if environment is VisualizationEnvironment.graphics_3d
@@ -2138,6 +2191,7 @@ class GeometryExtractor:
                 ),
                 environment=environment,
                 actions=actions,
+                render_hints=RenderHints(),
             ),
             summary=summary,
             warnings=warnings,

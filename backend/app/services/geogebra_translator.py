@@ -83,7 +83,11 @@ class GeoGebraTranslator:
                 issues=issues,
             )
 
-        commands = [self._emit_action(action) for action in validation.actions]
+        point_coordinates = self._point_coordinates(validation.actions)
+        commands = [
+            self._emit_action(action, point_coordinates=point_coordinates)
+            for action in validation.actions
+        ]
         return TranslationResult(
             commands=commands,
             command_string="; ".join(commands),
@@ -91,16 +95,61 @@ class GeoGebraTranslator:
             issues=issues,
         )
 
-    def _emit_action(self, action: GeometryAction) -> str:
+    def _point_coordinates(
+        self, actions: Iterable[GeometryAction]
+    ) -> dict[str, tuple[float, float]]:
+        coordinates: dict[str, tuple[float, float]] = {}
+        occupied: set[tuple[float, float]] = set()
+        pending_labels: list[str] = []
+
+        for action in actions:
+            if action.action is not GeometryActionType.CREATE_POINT or not action.label:
+                continue
+            if action.coordinates is not None:
+                value = (float(action.coordinates[0]), float(action.coordinates[1]))
+                coordinates[action.label] = value
+                occupied.add(value)
+            elif action.label in self.default_coordinates:
+                value = self.default_coordinates[action.label]
+                coordinates[action.label] = value
+                occupied.add(value)
+            else:
+                pending_labels.append(action.label)
+
+        candidate_index = 0
+        for label in pending_labels:
+            while True:
+                column = candidate_index % 5
+                row = candidate_index // 5
+                candidate_index += 1
+                candidate = (
+                    float(-6 + 3 * column),
+                    float(-3 + 5 * (column % 2) + 4 * row),
+                )
+                if candidate not in occupied:
+                    coordinates[label] = candidate
+                    occupied.add(candidate)
+                    break
+
+        return coordinates
+
+    def _emit_action(
+        self,
+        action: GeometryAction,
+        *,
+        point_coordinates: dict[str, tuple[float, float]] | None = None,
+    ) -> str:
         if action.action is GeometryActionType.EXECUTE_COMMAND:
             return self._emit_generic_command(action)
 
         label = action.label or ""
         if action.action is GeometryActionType.CREATE_POINT:
-            coordinates = action.coordinates or self.default_coordinates.get(
-                label, (0.0, 0.0)
+            coordinates = (
+                action.coordinates
+                or (point_coordinates or {}).get(label)
+                or self.default_coordinates.get(label, (0.0, 0.0))
             )
-            # Keep v1.0 numeric formatting stable for cached clients and tests.
+            # Keep numeric formatting stable for persisted commands and tests.
             return f"{label} = ({coordinates[0]}, {coordinates[1]})"
 
         if action.action is GeometryActionType.CREATE_LINE:

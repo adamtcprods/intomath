@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { href: "/#features", label: "Features" },
   { href: "/#how-it-works", label: "How it works" },
-  { href: "/dashboard/solve", label: "Solver" },
+  { href: "/solve", label: "Solver" },
 ];
 
 type SiteHeaderProps = {
@@ -36,8 +36,7 @@ export function SiteHeader({ currentPath = "/" }: SiteHeaderProps) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [menuOpen]);
 
-  const isActive = (href: string) =>
-    href === "/dashboard/solve" && currentPath.startsWith("/dashboard");
+  const isActive = (href: string) => currentPath === href;
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75">
