@@ -40,10 +40,13 @@ class LlamaClient:
 
     @property
     def available(self) -> bool:
+        return self.is_model_available(self.model)
+
+    def is_model_available(self, model: str) -> bool:
         if not self.enabled:
             return False
         unavailable_until = self._unavailable_until_by_base_url.get(
-            self._availability_key(), 0.0
+            self._availability_key(model), 0.0
         )
         return time.monotonic() >= unavailable_until
 
@@ -105,7 +108,9 @@ class LlamaClient:
         self,
         *,
         prompt: str,
+        model: str | None = None,
         max_tokens: int | None = None,
+        thinking_budget_tokens: int | None = None,
         timeout_seconds: float | None = None,
         json_schema: dict[str, Any] | None = None,
         operation: str = "local_json_generation",
@@ -113,11 +118,12 @@ class LlamaClient:
     ) -> dict[str, Any]:
         if not self.enabled:
             raise RuntimeError("Local llama.cpp integration is disabled.")
-        if not self.available:
+        selected_model = model or self.model
+        if not self.is_model_available(selected_model):
             raise IntegrationRequestError(
                 "Llama-server is temporarily unavailable after a recent connectivity failure.",
                 provider="llama.cpp",
-                model=self.model,
+                model=selected_model,
                 operation=operation,
             )
 
@@ -151,27 +157,33 @@ class LlamaClient:
             "base_url=%s timeout_seconds=%.1f sdk_retries=0",
             operation,
             trace_id,
-            self.model,
+            selected_model,
             base_url,
             request_timeout,
         )
         try:
+            extra_body = (
+                {"thinking_budget_tokens": thinking_budget_tokens}
+                if thinking_budget_tokens is not None
+                else None
+            )
             response = await asyncio.wait_for(
                 client.chat.completions.create(
-                    model=self.model,
+                    model=selected_model,
                     messages=[{"role": "user", "content": prompt}],
                     response_format=response_format,  # type: ignore[arg-type]
                     temperature=0.0,
                     max_tokens=request_max_tokens,
+                    extra_body=extra_body,
                 ),
                 timeout=request_timeout,
             )
         except (asyncio.TimeoutError, TimeoutError) as exc:
-            self._mark_unavailable()
+            self._mark_unavailable(selected_model)
             error = IntegrationRequestError(
-                f"Llama-server request timed out after {request_timeout:.1f}s for model {self.model}.",
+                f"Llama-server request timed out after {request_timeout:.1f}s for model {selected_model}.",
                 provider="llama.cpp",
-                model=self.model,
+                model=selected_model,
                 operation=operation,
             )
             diagnostics = exception_diagnostics(error)
@@ -180,7 +192,7 @@ class LlamaClient:
                 "error_type=%s error_message=%s status_code=%s response_body=%s",
                 operation,
                 trace_id,
-                self.model,
+                selected_model,
                 diagnostics.error_type,
                 diagnostics.error_message,
                 diagnostics.status_code,
@@ -190,11 +202,11 @@ class LlamaClient:
         except Exception as exc:
             diagnostics = exception_diagnostics(exc)
             if self._is_connectivity_failure(exc):
-                self._mark_unavailable()
+                self._mark_unavailable(selected_model)
             error = IntegrationRequestError(
-                f"Llama-server request failed for model {self.model}: {diagnostics.error_message}",
+                f"Llama-server request failed for model {selected_model}: {diagnostics.error_message}",
                 provider="llama.cpp",
-                model=self.model,
+                model=selected_model,
                 operation=operation,
                 status_code=diagnostics.status_code,
                 response_body=diagnostics.response_body,
@@ -204,7 +216,7 @@ class LlamaClient:
                 "error_type=%s error_message=%s status_code=%s response_body=%s",
                 operation,
                 trace_id,
-                self.model,
+                selected_model,
                 diagnostics.error_type,
                 diagnostics.error_message,
                 diagnostics.status_code,
@@ -212,11 +224,11 @@ class LlamaClient:
             )
             raise error from exc
 
-        self._clear_unavailable()
+        self._clear_unavailable(selected_model)
         text = response.choices[0].message.content or ""
         text = text.strip()
         if not text:
-            raise RuntimeError(f"Llama-server returned an empty response for {self.model}.")
+            raise RuntimeError(f"Llama-server returned an empty response for {selected_model}.")
 
         # Strip reasoning tags (<think>...</think>) if they are present in the response
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -225,19 +237,19 @@ class LlamaClient:
             payload = json.loads(self._strip_json_wrappers(text))
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"Llama-server returned invalid JSON for model {self.model} "
+                f"Llama-server returned invalid JSON for model {selected_model} "
                 f"at line {exc.lineno}, column {exc.colno}."
             ) from exc
         if not isinstance(payload, dict):
             raise RuntimeError(
                 f"Llama-server returned JSON {type(payload).__name__} for model "
-                f"{self.model}; expected object."
+                f"{selected_model}; expected object."
             )
         logger.info(
             "Llama-server request succeeded operation=%s trace_id=%s model=%s response_chars=%s",
             operation,
             trace_id,
-            self.model,
+            selected_model,
             len(text),
         )
         return payload
@@ -261,6 +273,7 @@ class LlamaClient:
         return await self.generate_json(
             prompt=f"{system_prompt.strip()}\n\n{user_prompt.strip()}".strip(),
             max_tokens=kwargs.get("max_tokens"),
+            thinking_budget_tokens=kwargs.get("thinking_budget_tokens"),
             timeout_seconds=timeout_seconds,
             json_schema=json_schema,
             operation=operation,
@@ -270,19 +283,19 @@ class LlamaClient:
     def _configured_base_url(self) -> str:
         return self.settings.local_solver_llama_base_url.rstrip("/")
 
-    def _mark_unavailable(self) -> None:
+    def _mark_unavailable(self, model: str | None = None) -> None:
         cooldown = float(
             getattr(self.settings, "local_llama_unavailable_cooldown_seconds", 60.0)
         )
-        self._unavailable_until_by_base_url[self._availability_key()] = (
+        self._unavailable_until_by_base_url[self._availability_key(model)] = (
             time.monotonic() + cooldown
         )
 
-    def _clear_unavailable(self) -> None:
-        self._unavailable_until_by_base_url.pop(self._availability_key(), None)
+    def _clear_unavailable(self, model: str | None = None) -> None:
+        self._unavailable_until_by_base_url.pop(self._availability_key(model), None)
 
-    def _availability_key(self) -> str:
-        return f"{self._configured_base_url()}|{self.model}"
+    def _availability_key(self, model: str | None = None) -> str:
+        return f"{self._configured_base_url()}|{model or self.model}"
 
     def _is_connectivity_failure(self, error: BaseException) -> bool:
         diagnostics = exception_diagnostics(error)

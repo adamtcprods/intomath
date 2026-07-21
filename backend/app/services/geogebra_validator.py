@@ -14,6 +14,7 @@ from app.schemas.geometry_dsl import (
     BooleanArgument,
     EquationArgument,
     ExpressionArgument,
+    DefinitionObjectType,
     GeoGebraArgument,
     GeoGebraValidationIssue,
     GeometryAction,
@@ -31,12 +32,11 @@ from app.schemas.geometry_dsl import (
     LABEL_PATTERN,
 )
 from app.services.geogebra_command_registry import (
-    GLOBAL_CORE_COMMANDS,
-    ROLLED_OUT_GENERIC_COMMANDS,
     CommandOverload,
     GeoGebraCommandRegistry,
     GeoGebraObjectType,
 )
+from app.services.geogebra_support_policy import SupportStatus
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,19 @@ _HIGH_LEVEL_OUTPUT_TYPES: dict[GeometryActionType, GeoGebraObjectType] = {
     GeometryActionType.PARALLEL: GeoGebraObjectType.LINE,
     GeometryActionType.ANGLE_BISECTOR: GeoGebraObjectType.LINE,
     GeometryActionType.CREATE_FUNCTION: GeoGebraObjectType.FUNCTION,
+}
+
+_DEFINITION_OUTPUT_TYPES: dict[DefinitionObjectType, GeoGebraObjectType] = {
+    DefinitionObjectType.function: GeoGebraObjectType.FUNCTION,
+    DefinitionObjectType.equation: GeoGebraObjectType.EQUATION,
+    DefinitionObjectType.expression: GeoGebraObjectType.FUNCTION,
+    DefinitionObjectType.number: GeoGebraObjectType.NUMBER,
+    DefinitionObjectType.point: GeoGebraObjectType.POINT,
+    DefinitionObjectType.vector: GeoGebraObjectType.VECTOR,
+    DefinitionObjectType.list: GeoGebraObjectType.LIST,
+    DefinitionObjectType.text: GeoGebraObjectType.TEXT,
+    DefinitionObjectType.boolean: GeoGebraObjectType.BOOLEAN,
+    DefinitionObjectType.interval: GeoGebraObjectType.INTERVAL,
 }
 
 _COMPATIBLE_ACTUAL_TYPES: dict[GeoGebraObjectType, frozenset[GeoGebraObjectType]] = {
@@ -122,6 +135,8 @@ def _action_references(action: GeometryAction) -> list[str]:
             for argument in action.arguments
             for reference in _argument_references(argument)
         ]
+    if action.action is GeometryActionType.DEFINE_OBJECT and action.value is not None:
+        return _argument_references(action.value)
     if action.action is GeometryActionType.CREATE_LINE:
         return list(action.points or action.through or [])[:2]
     if action.action is GeometryActionType.CREATE_CIRCLE:
@@ -170,6 +185,10 @@ def _argument_type(
     if isinstance(argument, EquationArgument):
         return GeoGebraObjectType.EQUATION
     if isinstance(argument, ListArgument):
+        if argument.items and all(
+            isinstance(item, ListArgument) for item in argument.items
+        ):
+            return GeoGebraObjectType.MATRIX
         return GeoGebraObjectType.LIST
     if isinstance(argument, IntervalArgument):
         return GeoGebraObjectType.INTERVAL
@@ -279,7 +298,9 @@ class GeoGebraDSLValidator:
                     )
                 else:
                     output_to_index[output] = index
-                    object_types[output] = self._declared_output_type(action)
+                    object_types[output] = self._declared_output_type(
+                        action, object_types
+                    )
 
         dependencies: list[set[int]] = [set() for _ in actions]
         dependents: list[set[int]] = [set() for _ in actions]
@@ -349,6 +370,18 @@ class GeoGebraDSLValidator:
                 )
             )
             sorted_indices = list(range(len(actions)))
+
+        # Resolve same-as-input command outputs after dependency sorting so a
+        # transformed point remains a point (and likewise for other objects).
+        resolved_object_types: dict[str, GeoGebraObjectType] = {}
+        for index in sorted_indices:
+            action = actions[index]
+            output = action.output_label
+            if output is not None:
+                resolved_object_types[output] = self._declared_output_type(
+                    action, resolved_object_types
+                )
+        object_types = resolved_object_types
 
         for index in sorted_indices:
             action = actions[index]
@@ -483,6 +516,9 @@ class GeoGebraDSLValidator:
         elif action.action is GeometryActionType.CREATE_FUNCTION:
             if not action.equation:
                 message = "CREATE_FUNCTION requires a validated equation expression."
+        elif action.action is GeometryActionType.DEFINE_OBJECT:
+            if action.output is None or action.object_type is None or action.value is None:
+                message = "DEFINE_OBJECT requires output, object_type, and value."
 
         if message:
             issues.append(_issue("invalid_action_shape", index, action, message))
@@ -498,7 +534,15 @@ class GeoGebraDSLValidator:
                     )
                 )
 
-    def _declared_output_type(self, action: GeometryAction) -> GeoGebraObjectType:
+    def _declared_output_type(
+        self,
+        action: GeometryAction,
+        object_types: dict[str, GeoGebraObjectType] | None = None,
+    ) -> GeoGebraObjectType:
+        if action.action is GeometryActionType.DEFINE_OBJECT:
+            if action.object_type is None:
+                return GeoGebraObjectType.UNKNOWN
+            return _DEFINITION_OUTPUT_TYPES[action.object_type]
         if action.action is not GeometryActionType.EXECUTE_COMMAND:
             return _HIGH_LEVEL_OUTPUT_TYPES.get(
                 action.action, GeoGebraObjectType.UNKNOWN
@@ -506,14 +550,16 @@ class GeoGebraDSLValidator:
         if not action.command:
             return GeoGebraObjectType.UNKNOWN
         output_type = self.registry.output_type(action.command)
-        if output_type is GeoGebraObjectType.UNKNOWN and action.command in {
-            "Reflect",
-            "Rotate",
-            "Translate",
-        }:
+        if (
+            output_type is GeoGebraObjectType.UNKNOWN
+            and self.registry.output_type_strategy(action.command)
+            == "same_as_first_argument"
+        ):
             first = action.arguments[0] if action.arguments else None
             if isinstance(first, ReferenceArgument):
-                return GeoGebraObjectType.UNKNOWN
+                return (object_types or {}).get(
+                    first.value, GeoGebraObjectType.UNKNOWN
+                )
             if first is not None:
                 return _argument_type(first, {})
         return output_type
@@ -570,7 +616,6 @@ class GeoGebraDSLValidator:
         if (
             allowed is not None
             and definition.name.casefold() not in allowed
-            and definition.name not in GLOBAL_CORE_COMMANDS
         ):
             issues.append(
                 _issue(
@@ -596,26 +641,31 @@ class GeoGebraDSLValidator:
                 )
             )
             return
-        if definition.name not in ROLLED_OUT_GENERIC_COMMANDS:
+        eligible_overloads = [
+            overload
+            for overload in environment_overloads
+            if overload.is_runtime_eligible_in(environment)
+        ]
+        if not eligible_overloads:
             issues.append(
                 _issue(
-                    "command_family_not_rolled_out",
+                    "blocked_command",
                     index,
                     action,
-                    f"Command '{definition.name}' is cataloged but its command family "
-                    "has not completed IntoMath's typed/runtime rollout.",
+                    f"Command '{definition.name}' has no safely executable overload "
+                    f"for environment '{environment.value}'.",
                 )
             )
             return
 
         count_overloads = [
             overload
-            for overload in environment_overloads
+            for overload in eligible_overloads
             if _count_matches(overload, len(action.arguments))
         ]
         if not count_overloads:
             expected = ", ".join(
-                overload.signature.original for overload in environment_overloads[:4]
+                overload.signature.original for overload in eligible_overloads[:12]
             )
             issues.append(
                 _issue(
@@ -628,10 +678,12 @@ class GeoGebraDSLValidator:
             )
             return
 
-        if not any(
-            _types_match(overload, action.arguments, object_types)
+        matching_overloads = [
+            overload
             for overload in count_overloads
-        ):
+            if _types_match(overload, action.arguments, object_types)
+        ]
+        if not matching_overloads:
             actual = ", ".join(
                 _argument_type(argument, object_types).value
                 for argument in action.arguments
@@ -642,6 +694,21 @@ class GeoGebraDSLValidator:
                     index,
                     action,
                     f"Argument types ({actual}) do not match a known '{definition.name}' overload.",
+                )
+            )
+        elif not any(
+            overload.support_status is SupportStatus.supported
+            for overload in matching_overloads
+        ):
+            issues.append(
+                _issue(
+                    "experimental_command",
+                    index,
+                    action,
+                    f"Command '{definition.name}' uses a safe catalog overload without "
+                    "a checked-in browser acceptance record; runtime rejection will "
+                    "trigger construction rollback.",
+                    severity=ValidationSeverity.warning,
                 )
             )
 
@@ -664,9 +731,13 @@ class GeoGebraDSLValidator:
         environment: VisualizationEnvironment,
         issues: list[GeoGebraValidationIssue],
     ) -> None:
-        if action.action is not GeometryActionType.EXECUTE_COMMAND:
+        if action.action is GeometryActionType.DEFINE_OBJECT:
+            arguments = [action.value] if action.value is not None else []
+        elif action.action is GeometryActionType.EXECUTE_COMMAND:
+            arguments = action.arguments
+        else:
             return
-        for argument in self._walk_arguments(action.arguments):
+        for argument in self._walk_arguments(arguments):
             if not isinstance(argument, (PointArgument, VectorArgument)):
                 continue
             if (

@@ -194,6 +194,7 @@ export function GeoGebraApplet({
     () => appletCommands.join("\n"),
     [appletCommands],
   );
+
   const [scriptStatus, setScriptStatus] = useState<LoadStatus>("idle");
   const [appletStatus, setAppletStatus] = useState<LoadStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -343,7 +344,7 @@ export function GeoGebraApplet({
       <CardHeader className="p-5">
         <CardTitle className="flex items-center gap-2 text-base">
           <Construction className="h-4 w-4 text-primary" />
-          Interactive visualization
+          Visualization
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 p-5 pt-0">

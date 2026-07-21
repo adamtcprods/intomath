@@ -88,8 +88,6 @@ class LlamaTriviaSolver:
         difficulty: Difficulty,
     ) -> LlamaTriviaSolveResult | None:
         """Return a result or None if llama.cpp is unavailable, disabled, or not confident."""
-        _ = (problem_type, difficulty)
-
         if not getattr(self.llama_client, "enabled", False):
             return None
         if not getattr(self.llama_client, "available", True):

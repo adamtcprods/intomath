@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Calculator, Menu, X } from "lucide-react";
+import { FunctionSquare, Menu, X } from "lucide-react";
 
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 
@@ -45,13 +45,14 @@ export function SiteHeader({ currentPath = "/" }: SiteHeaderProps) {
       >
         <Link
           aria-label="IntoMath home"
-          className="group flex shrink-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+          className="group flex shrink-0 items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
           href="/"
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-transform group-hover:-rotate-3">
-            <Calculator className="h-[1.125rem] w-[1.125rem]" />
-          </span>
-          <span className="text-base font-semibold tracking-[-0.025em]">
+          <FunctionSquare
+            aria-hidden="true"
+            className="h-7 w-7 shrink-0 text-violet-500 transition-transform group-hover:-rotate-3"
+          />
+          <span className="bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 bg-clip-text text-2xl font-extrabold tracking-[-0.05em] text-transparent transition-opacity group-hover:opacity-85">
             IntoMath
           </span>
         </Link>

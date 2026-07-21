@@ -1,0 +1,41 @@
+{
+  "accepted_overloads": [
+    {
+      "command_name": "Distance",
+      "environments": [
+        "geometry_2d"
+      ],
+      "fixture_id": "measurement_distance",
+      "output_type": "Number",
+      "signature": "Distance( <Point>, <Object> )"
+    },
+    {
+      "command_name": "Line",
+      "environments": [
+        "geometry_2d"
+      ],
+      "fixture_id": "core_line",
+      "output_type": "Line",
+      "signature": "Line( <Point>, <Point> )"
+    },
+    {
+      "command_name": "Rotate",
+      "environments": [
+        "geometry_2d"
+      ],
+      "fixture_id": "transform_rotate",
+      "output_type_strategy": "same_as_first_argument",
+      "signature": "Rotate( <Object>, <Angle>, <Point> )"
+    },
+    {
+      "command_name": "Tangent",
+      "environments": [
+        "geometry_2d"
+      ],
+      "fixture_id": "core_circle_tangent",
+      "output_type": "Line",
+      "signature": "Tangent( <Point>, <Conic> )"
+    }
+  ],
+  "schema_version": "1.0"
+}

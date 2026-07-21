@@ -48,6 +48,8 @@ def test_llama_client_disables_opaque_sdk_retries_and_returns_json(
     result = asyncio.run(
         client.generate_json(
             prompt="Return JSON.",
+            model="tiny-routing-model",
+            thinking_budget_tokens=0,
             timeout_seconds=1.0,
             operation="local_geometry_extraction",
             trace_id="retry-test",
@@ -56,7 +58,8 @@ def test_llama_client_disables_opaque_sdk_retries_and_returns_json(
 
     assert constructor_kwargs["max_retries"] == 0
     assert constructor_kwargs["base_url"] == "http://localhost:18080/v1"
-    assert request_kwargs["model"] == "local-test-model"
+    assert request_kwargs["model"] == "tiny-routing-model"
+    assert request_kwargs["extra_body"] == {"thinking_budget_tokens": 0}
     assert result == {"ok": True}
 
 

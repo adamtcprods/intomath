@@ -47,7 +47,9 @@ def with_local_solver_routing(
         parser_model=LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
         solver_model=solver_model,
         vision_model=routing.vision_model,
+        visualization_environment=routing.visualization_environment,
         reason="; ".join(reason_parts),
+        visualization_search_terms=routing.visualization_search_terms,
     )
 
 
@@ -62,7 +64,9 @@ def with_structured_solver_routing(
         parser_model=routing.parser_model,
         solver_model=solver_model,
         vision_model=routing.vision_model,
+        visualization_environment=routing.visualization_environment,
         reason=f"{routing.reason}; result produced by {solver_model}",
+        visualization_search_terms=routing.visualization_search_terms,
     )
 
 
@@ -75,7 +79,9 @@ def with_local_subquestion_routing(
         parser_model=LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
         solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
         vision_model=routing.vision_model,
+        visualization_environment=routing.visualization_environment,
         reason=f"{routing.reason}; deterministic local solver used because it {reason}",
+        visualization_search_terms=routing.visualization_search_terms,
     )
 
 

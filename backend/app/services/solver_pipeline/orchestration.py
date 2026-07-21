@@ -15,7 +15,6 @@ from app.schemas.solve import (
     VisualizationPayload,
 )
 from app.services.cache import TTLCache
-from app.services.geometry_extractor import classify_visualization_capability
 
 from .persistence import persist_solve_result
 from .response_builder import StructuredSolveDraft
@@ -26,6 +25,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _cached_response_is_usable(
+    request: SolveRequest,
+    normalized_text: str,
+    response: SolveResponse,
+) -> bool:
+    _ = normalized_text
+    if not request.options.include_visualization:
+        return True
+    if response.visualization.kind != "none":
+        return True
+    if response.routing.visualization_environment is not None:
+        return False
+    if response.problem_type == "geometry":
+        # Older router results could contradict themselves by classifying a
+        # planar geometry prompt while selecting no visualization environment.
+        return False
+    return "left unclassified" not in response.routing.reason.casefold()
 
 
 async def solve_request(
@@ -72,27 +90,47 @@ async def solve_request(
             )
 
     detected_subquestions = detect_subquestions(normalized_text)
+    cache_key = service._build_cache_key(normalized_text, request)
+    cached_response = response_cache.get(cache_key)
+    if cached_response is not None:
+        if not _cached_response_is_usable(
+            request, normalized_text, cached_response
+        ):
+            logger.info(
+                "Solve cache bypassed request_id=%s cache_key_prefix=%s "
+                "reason=visualizable_prompt_missing_visualization",
+                request_id,
+                cache_key[:12],
+            )
+            response_cache.delete(cache_key)
+        else:
+            logger.info(
+                "Solve cache hit request_id=%s cache_key_prefix=%s",
+                request_id,
+                cache_key[:12],
+            )
+            return cached_response.model_copy(
+                update={"request_id": request_id, "cached": True}
+            )
+
     routing = await service.router.route_async(
         normalized_text, has_image=bool(request.input.image_base64)
     )
     logger.info(
-        "Solve routing request_id=%s problem_type=%s difficulty=%s parser_model=%s solver_model=%s vision_model=%s",
+        "Solve routing request_id=%s problem_type=%s difficulty=%s parser_model=%s "
+        "solver_model=%s vision_model=%s visualization_environment=%s",
         request_id,
         routing.problem_type.value,
         routing.difficulty.value,
         routing.parser_model,
         routing.solver_model,
         routing.vision_model,
+        (
+            routing.visualization_environment.value
+            if routing.visualization_environment is not None
+            else "none"
+        ),
     )
-    cache_key = service._build_cache_key(normalized_text, request)
-    cached_response = response_cache.get(cache_key)
-    if cached_response is not None:
-        logger.info(
-            "Solve cache hit request_id=%s cache_key_prefix=%s",
-            request_id,
-            cache_key[:12],
-        )
-        return cached_response.model_copy(update={"request_id": request_id, "cached": True})
 
     solve_text = normalized_text
     local_result = None
@@ -177,7 +215,7 @@ async def solve_request(
     visualization = VisualizationPayload(
         kind="none", summary=None, dsl=None, geogebra=None
     )
-    visualization_classification = classify_visualization_capability(solve_text)
+    visualization_environment = routing.visualization_environment
     solved_answer_text = "\n".join(
         value
         for value in [
@@ -191,7 +229,7 @@ async def solve_request(
         ]
         if value
     )
-    if request.options.include_visualization and visualization_classification.visualizable:
+    if request.options.include_visualization and visualization_environment is not None:
         visualization_stage = "extraction"
         try:
             logger.info(
@@ -202,8 +240,9 @@ async def solve_request(
             )
             extraction = await service.geometry_extractor.extract(
                 solve_text,
-                routing.problem_type,
                 routing.parser_model,
+                environment=visualization_environment,
+                semantic_query_terms=routing.visualization_search_terms,
                 request_id=request_id,
             )
             if extraction.warnings:
@@ -281,10 +320,9 @@ async def solve_request(
             )
     elif request.options.include_visualization:
         logger.info(
-            "Visualization skipped before extraction request_id=%s capability=%s reason=%s",
+            "Visualization skipped before extraction request_id=%s "
+            "visualization_environment=none reason=model_router_selected_none",
             request_id,
-            visualization_classification.capability.value,
-            visualization_classification.reason,
         )
 
     public_warnings = service._without_backend_config_warnings(warnings)
@@ -309,6 +347,7 @@ async def solve_request(
             parser_model=routing.parser_model,
             solver_model=routing.solver_model,
             vision_model=routing.vision_model,
+            visualization_environment=routing.visualization_environment,
             reason=routing.reason,
         ),
         cached=False,
@@ -334,7 +373,13 @@ async def solve_request(
     persist_solve_result(
         service.db, request, raw_text, normalized_text, routing, response
     )
-    response_cache.set(cache_key, response)
+    if not _cached_response_is_usable(request, solve_text, response):
+        logger.info(
+            "Solve response not cached request_id=%s reason=visualizable_prompt_missing_visualization",
+            request_id,
+        )
+    else:
+        response_cache.set(cache_key, response)
     return response
 
 

@@ -1,11 +1,105 @@
 {
-  "catalog_sha256": "0eb420707aaec449d09838c769365181c718fefa5913ed0ef5a956cad5dc209c",
+  "catalog_sha256": "a6bedf07b280281810b1e82a46dd0306649147c2ff71b3525a025f0cc2d1d034",
   "command_names": 502,
   "command_pages_parsed": 502,
-  "generation_timestamp": "2026-07-15T16:52:36.703206+00:00",
-  "generator_version": "1.0.0",
+  "families": {
+    "cas": {
+      "command_names": 139,
+      "overloads": 371
+    },
+    "discrete_math": {
+      "command_names": 6,
+      "overloads": 6
+    },
+    "financial": {
+      "command_names": 5,
+      "overloads": 5
+    },
+    "general": {
+      "command_names": 11,
+      "overloads": 19
+    },
+    "geometry_2d": {
+      "command_names": 84,
+      "overloads": 182
+    },
+    "graphics_3d": {
+      "command_names": 53,
+      "overloads": 149
+    },
+    "graphing_calculus": {
+      "command_names": 122,
+      "overloads": 313
+    },
+    "lists": {
+      "command_names": 40,
+      "overloads": 98
+    },
+    "logic": {
+      "command_names": 11,
+      "overloads": 17
+    },
+    "optimization": {
+      "command_names": 2,
+      "overloads": 4
+    },
+    "probability": {
+      "command_names": 46,
+      "overloads": 100
+    },
+    "scripting": {
+      "command_names": 67,
+      "overloads": 115
+    },
+    "spreadsheet": {
+      "command_names": 8,
+      "overloads": 10
+    },
+    "statistics": {
+      "command_names": 81,
+      "overloads": 181
+    },
+    "text": {
+      "command_names": 27,
+      "overloads": 77
+    },
+    "transformations": {
+      "command_names": 6,
+      "overloads": 15
+    },
+    "vector_matrix": {
+      "command_names": 28,
+      "overloads": 52
+    }
+  },
+  "generation_timestamp": "2026-07-19T20:17:07.221475+00:00",
+  "generator_version": "1.4.0",
   "overloads": 1052,
-  "schema_version": "1.0",
+  "runtime_eligibility": {
+    "blocked": {
+      "command_names": 68,
+      "overloads": 119
+    },
+    "eligible": {
+      "command_names": 434,
+      "overloads": 933
+    }
+  },
+  "schema_version": "1.4",
+  "support_statuses": {
+    "blocked": {
+      "command_names": 68,
+      "overloads": 119
+    },
+    "experimental": {
+      "command_names": 434,
+      "overloads": 929
+    },
+    "supported": {
+      "command_names": 4,
+      "overloads": 4
+    }
+  },
   "upstream_commit": "83d180f2469c47f13f6884fce3cc1926b58c2681",
   "upstream_repository": "https://github.com/geogebra/manual"
 }

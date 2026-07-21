@@ -25,8 +25,14 @@ class FakeLlamaClient:
         return self.payload
 
 
-def test_selector_uses_deterministic_solver_before_llama() -> None:
-    llama = FakeLlamaClient()
+def test_selector_requires_llama_to_select_deterministic_solver() -> None:
+    llama = FakeLlamaClient(
+        {
+            "use_local_solver": True,
+            "normalized_prompt": "2x + 5 = 3x - 1",
+            "reason": "selected exact linear-equation execution",
+        }
+    )
     selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
@@ -40,8 +46,24 @@ def test_selector_uses_deterministic_solver_before_llama() -> None:
     assert result is not None
     assert result.answer.latex == "x = 6"
     assert result.problem_type is ProblemType.algebra
-    assert result.detector_model is None
-    assert llama.calls == 0
+    assert result.detector_model == "local:test-detector"
+    assert llama.calls == 1
+
+
+def test_exact_pattern_does_not_bypass_llama_rejection() -> None:
+    llama = FakeLlamaClient({"use_local_solver": False})
+    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
+
+    result = asyncio.run(
+        selector.solve_if_supported(
+            "2x + 5 = 3x - 1",
+            ProblemType.algebra,
+            Difficulty.easy,
+        )
+    )
+
+    assert result is None
+    assert llama.calls == 1
 
 
 def test_selector_accepts_llama_normalized_supported_prompt() -> None:
@@ -113,4 +135,4 @@ def test_selector_rejects_llama_hint_if_deterministic_solver_cannot_solve_it() -
     )
 
     assert result is None
-    assert llama.calls == 1
+    assert llama.calls == 0

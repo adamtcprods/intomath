@@ -1,4 +1,4 @@
-# IntoMath 2.0 Architecture
+# IntoMath Architecture
 
 ## Design goals
 
@@ -7,7 +7,7 @@ IntoMath is designed as a visual learning product, not a chatbot wrapper.
 Core architectural goals:
 
 1. **Structured outputs over free-form prose**
-2. **Deterministic visualization generation**
+2. **Model-generated visualization plans with deterministic validation**
 3. **Configurable model routing**
 4. **Focused solver UX**
 5. **Fast feedback with caching and useful deterministic local solving**
@@ -23,7 +23,7 @@ flowchart TD
     E --> L[Local solver selector]
     L --> F[Structured solve generation]
     E --> G[Geometry extraction]
-    G --> H[Capability classification + bounded command retrieval]
+    G --> H[Semantic query expansion + bounded command retrieval]
     H --> I[Typed Geometry DSL 1.1]
     I --> V[Schema + signature + type + dependency validation]
     V --> T[Deterministic GeoGebra translator]
@@ -95,55 +95,54 @@ flowchart TD
   - persistence
   - response caching
 - `model_router.py`
-  - configurable routing heuristics
+  - schema-constrained local-AI classification of subject, difficulty, and visualization environment
+  - explicit unclassified route when the model is unavailable or invalid
 - `local_solver_selector.py`
-  - tries deterministic solving first and optionally uses the local llama.cpp model to normalize supported prompts
+  - lets the local llama.cpp model select and normalize a narrow deterministic execution tool
+  - never sends geometry through the pre-model deterministic path
 - `ocr_service.py`
   - image-to-structured-text stage through local DeepSeek OCR
 - `geometry_extractor.py`
   - validated, schema-constrained DSL extraction through the local llama.cpp model for local solve routes
   - remote model extraction for model-backed geometry routes
-  - small deterministic fallback for unavailable, semantically mismatched, or invalid model output
+  - tiny-model semantic catalog query expansion, bounded to 10 retrieved commands
+  - returns no visualization when every model-backed parser fails
 - `geogebra_translator.py`
   - deterministic DSL → GeoGebra translation
 - `geogebra_command_registry.py`
-  - cached overload registry, progressive signature normalization, capability mapping, and keyword retrieval
+  - cached overload registry, progressive signature normalization, generated capability metadata, and bounded retrieval
 - `geogebra_validator.py`
   - label/type/environment/allowlist/dependency validation and topological ordering
 - `fallback_solver.py`
-  - deterministic local solving for supported prompts, used before model-backed solving when it returns a high-confidence result
+  - deterministic execution for AI-selected arithmetic/algebra shapes and last-resort solve fallback
 - `cache.py`
   - in-memory TTL response cache
 
 ## Routing architecture
 
-The router currently classifies problems by keyword and shape heuristics into:
+The local tiny model classifies prompts into:
 
 - `arithmetic`
 - `algebra`
 - `number_theory`
 - `geometry`
-- `coordinate_geometry`
 - `trigonometry`
 - `calculus`
 - `statistics`
 - `probability`
-- `functions`
 - `general`
 
-Difficulty is then assessed separately:
-- proof keywords → hard
-- multi-point geometry → hard
-- proof-style calculus → hard
-- longer, denser prompts → medium or hard
-- straightforward arithmetic / algebra → easy
+It selects difficulty and visualization environment in the same constrained JSON
+response. If that response is unavailable or invalid, routing remains explicitly
+`general`/`medium` with no visualization environment; backend keywords do not guess
+the missing classification.
 
 ### Model policy
 
 | Use case | Model / route |
 |---|---|
-| Supported arithmetic, linear equations, quadratic graphs, simple constructions | `local:deterministic-solver` |
-| Local routing, normalization, trivia, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation/fallback remains authoritative |
+| AI-selected arithmetic, linear equations, and quadratic graph analysis | `local:deterministic-solver`; exact parsing is an execution gate after AI selection |
+| Local semantic routing, normalization, trivia, catalog-query expansion, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
 | Easy algebra / arithmetic outside deterministic coverage | `openai/gpt-oss-20b` via NVIDIA NIM |
 | Hard geometry / proofs / multi-step reasoning | `openai/gpt-oss-120b` via NVIDIA NIM |
 | Model fallback | NVIDIA NIM order: gpt-oss-120b → gpt-oss-20b, with bounded reasoning and deterministic post-validation |
@@ -158,9 +157,10 @@ The production flow is:
 
 ```text
 prompt
-→ capability classification
-→ `none` returns without retrieval or model extraction
-→ bounded catalog retrieval
+→ local model selects problem type, difficulty, and visualization environment
+→ model-selected `none` returns without retrieval or DSL extraction
+→ tiny-model semantic query expansion
+→ bounded catalog retrieval (10 command names)
 → model emits typed DSL
 → Pydantic schema validation
 → retrieved-command/signature/type/environment validation
@@ -175,15 +175,15 @@ The model describes intent. It does not emit construction strings, scripts, or
 JavaScript. The backend is the only component that creates GeoGebra command
 syntax. Applet styling and view changes are separate typed API calls.
 
-Capability classification is driven by structures stated in the problem, not by the
-router's broad problem type or numeric tuples that appear only in a solved answer.
+Visualization-environment classification comes from the router model. Command
+capabilities come from generated manual-category families, not command-name lists.
 The validator separately rejects point-only plans whose coordinates merely reproduce
 answer tuples absent from the normalized problem statement.
 
 Remote solve and geometry requests include strict response schemas in their prompts and
 validate responses locally. Provider/schema unavailability is distinct from invalid
-model output. Geometry falls through to the constrained local parser, the explicitly
-named NVIDIA NIM models, and finally the limited deterministic construction parser. The
+model output. Geometry falls through to the constrained local parser and the explicitly
+named NVIDIA NIM models. If no model returns a valid plan, visualization stays empty. The
 published closed NVIDIA `ChatRequest` schemas for these models omit `response_format`,
 so non-streaming output is explicitly treated as an unenforced proposal. gpt-oss uses
 low reasoning effort. The same authoritative payload,
@@ -237,10 +237,11 @@ The DSL schema is defined in `backend/app/schemas/geometry_dsl.py`.
 - `PARALLEL`
 - `ANGLE_BISECTOR`
 - `CREATE_FUNCTION`
+- `DEFINE_OBJECT`
 - `EXECUTE_COMMAND`
 
 DSL `1.1` is the sole accepted visualization format. It supports the existing
-high-level action fields and `EXECUTE_COMMAND`; the latter's output label is
+high-level action fields, `DEFINE_OBJECT`, and `EXECUTE_COMMAND`; the latter's output label is
 deliberately distinct from command arguments and from `label` on high-level
 actions. Generic commands may omit `output` only for a terminal result that will
 not be referenced later. The validator emits `untracked_output` as a warning,
@@ -252,6 +253,12 @@ has a deterministic serializer. Expressions use a small mathematical grammar;
 object dependencies must use `reference`, not identifiers hidden inside an
 expression.
 
+`DEFINE_OBJECT` covers safe definitions that are not command calls. It carries
+`output`, `object_type`, and one typed `value`; for example, a function uses an
+equation value such as `f(x) = x^2`. It is preferred for new definitions and can
+eventually subsume specialized definition actions. `CREATE_FUNCTION` remains
+accepted for DSL 1.1 compatibility.
+
 ### Environments and perspectives
 
 The schema represents `geometry_2d`, `graphing`, `graphics_3d`, `cas`,
@@ -259,11 +266,13 @@ The schema represents `geometry_2d`, `graphing`, `graphics_3d`, `cas`,
 GeoGebra Classic standard perspectives: geometry `2`, algebra/graphics `1`,
 spreadsheet `3`, CAS `4`, 3D `5`, and probability/statistics `6`.
 
-This is a capability model, not a universal-support claim. The production
-generic-command rollout currently admits only the reviewed core 2D command
-set. `CREATE_FUNCTION` continues to support the existing deterministic graphing
-path. Other environments are classified, indexed, and perspective-aware but
-remain gated until their command families have typed and runtime coverage.
+This is a capability model, not a universal acceptance claim. The existing
+high-level actions and generic definitions remain available. All 933 overloads
+belonging to the 434 non-blocked command names are runtime-eligible in their
+classified environments, including graphing, statistics/probability, 3D, CAS,
+and spreadsheet. Four overloads currently have checked-in browser acceptance
+evidence; the rest remain honestly labeled experimental and rely on runtime
+rejection handling.
 
 ## Command registry and discovery
 
@@ -274,17 +283,19 @@ pinned upstream commit. The registry:
 2. retains original signatures and marks uncertain normalization;
 3. extracts bounded counts, variadic markers, approximate types, categories,
    CAS and special-environment requirements;
-4. marks scripting/state/media commands unsafe;
-5. searches exact names, justified aliases, categories, descriptions, and
-   prompt keywords; and
-6. returns at most 20 names (the extractor currently requests 10 and then
-   applies the rollout gate).
+4. derives acceptance status and independent runtime eligibility for every
+   exact overload;
+5. searches exact names, model-expanded semantic terms, categories, descriptions,
+   and prompt keywords; and
+6. returns accepted or experimental safe overloads, at most 20 command names
+   (the extractor currently requests 10).
 
-Only retrieved commands plus a small global core may be emitted. A cataloged
-command outside that boundary receives `command_not_retrieved` or
-`command_family_not_rolled_out`. Debug solve responses include the bounded name,
-score, and signatures only when `APP_DEBUG=true`; full prompts are never
-returned.
+Only the bounded retrieved names may be emitted. A cataloged command outside
+that boundary receives `command_not_retrieved`; an unaccepted overload receives
+an `experimental_command` warning, and permanently denied behavior receives
+`unsafe_command`/`blocked_command`. Debug solve responses include the bounded
+name, score, and supported signatures only when `APP_DEBUG=true`; full prompts
+are never returned.
 
 GeoGebra command definitions are derived from the official manual. The manual
 is not vendored here:
@@ -350,16 +361,30 @@ result. It must not become the ordinary AI path.
 
 ## Command-family rollout
 
-The reviewed production slice is core 2D geometry plus the existing
-deterministic function action. Transformations and common measurements are in
-the core generic set and have registry/serializer validation tests, but browser
-runtime behavior is still checked at execution time.
+Catalog schema `1.4` keeps the GeoGebra manual's overlapping `category` and
+`all_categories` fields, adds a stable `families` list and generated
+`capabilities`, and records overload-level `support_status`,
+`support_requirements`, acceptance-backed output metadata,
+`runtime_accepted_environments`, and `runtime_eligible`.
+The current families are 2D geometry, transformations, graphing/calculus, 3D,
+CAS, statistics, probability, spreadsheet, lists, vector/matrix, discrete math,
+financial, logic, optimization, text, scripting, general, and other. Catalog
+metadata reports unique command-name and overload counts for each family and
+status, and the registry exposes family and support-status queries.
 
-For each next family: add capability mappings, fixture signatures and types,
-retrieval examples, translator cases, applet/manual runtime notes, then add its
-names to `ROLLED_OUT_GENERIC_COMMANDS`. Recommended order remains functions and
-calculus; lists/statistics; loci/advanced geometry; 3D; CAS. Spreadsheet and
-scripting stay separate until their UI/security designs exist.
+Acceptance is derived per overload. `supported` requires a safely normalized
+signature, representable typed arguments, known output type, correct environment
+metadata, and an exact runtime-acceptance record. Missing any criterion yields
+`experimental`, but safe experimental overloads remain usable. Scripting and
+unsafe state/media behavior is `blocked` even if an acceptance record is
+accidentally added. The browser checks every command's boolean `evalCommand`
+result and rolls the construction back on failure.
+
+For each next family: add capability/output mappings, fixture signatures and
+types, retrieval examples, translator cases, and exact applet acceptance
+records. The order is transformations and measurements; graphing/calculus;
+statistics/probability; 3D; CAS; spreadsheet. Scripting, network/file behavior,
+and unsafe state commands are permanently blocked.
 
 ## Persistence layer
 

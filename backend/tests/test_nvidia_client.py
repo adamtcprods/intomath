@@ -72,9 +72,26 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
     assert payload["stream"] is False
     assert "response_format" not in payload
     assert "Required JSON schema" in payload["messages"][0]["content"]
-    assert payload["reasoning_effort"] == "low"
+    assert "JSON-escape every backslash" in payload["messages"][0]["content"]
+    assert payload["reasoning_effort"] == "medium"
     assert "chat_template_kwargs" not in payload
     assert "reasoning_budget" not in payload
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_effort"),
+    [
+        ("structured_math_solution", "medium"),
+        ("structured_math_steps_repair", "medium"),
+        ("structured_math_solution_repair", "medium"),
+        ("geometry_extraction", "low"),
+        ("local_route_classification", "low"),
+    ],
+)
+def test_nvidia_reasoning_effort_matches_operation(
+    operation: str, expected_effort: str
+) -> None:
+    assert NvidiaClient(_settings())._reasoning_effort(operation) == expected_effort
 
 
 def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:

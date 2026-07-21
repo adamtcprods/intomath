@@ -97,8 +97,9 @@ class NvidiaClient:
             "stream": False,
         }
         if model in NVIDIA_GPT_OSS_MODELS:
-            payload["reasoning_effort"] = "low"
-            reasoning_controls = "reasoning_effort=low"
+            reasoning_effort = self._reasoning_effort(operation)
+            payload["reasoning_effort"] = reasoning_effort
+            reasoning_controls = f"reasoning_effort={reasoning_effort}"
         else:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
             payload["reasoning_budget"] = 64
@@ -327,12 +328,20 @@ class NvidiaClient:
                 break
         return reconstructed
 
+    def _reasoning_effort(self, operation: str) -> str:
+        if operation in {
+            "structured_math_solution",
+            "structured_math_steps_repair",
+            "structured_math_solution_repair",
+        }:
+            return "medium"
+        return "low"
+
     def _json_only_system_prompt(self, system_prompt: str) -> str:
         return (
             f"{system_prompt.strip()}\n\n"
             "Return exactly one JSON object as the entire response. Do not include "
-            "reasoning, Markdown fences, raw scripts, or text outside the JSON object."
+            "reasoning, Markdown fences, raw scripts, or text outside the JSON object. "
+            "JSON-escape every backslash inside strings (for example, emit "
+            '"\\\\angle" in raw JSON).'
         )
-
-
-assert isinstance(NvidiaClient, type)  # NvidiaClient already satisfies StructuredCompletionClient

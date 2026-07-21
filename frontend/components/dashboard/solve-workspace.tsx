@@ -64,8 +64,10 @@ export function SolveWorkspace() {
   const fileReaderRef = useRef<FileReader | null>(null);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+  const [isVisualizationWarningDismissed, setIsVisualizationWarningDismissed] =
+    useState(false);
 
-  const activePrompt = useMemo(() => input.trim(), [input]);
+  const activePrompt = input.trim();
   const geogebra = result?.visualization.geogebra;
   const commands = geogebra?.commands ?? [];
   const visualizationEnvironment =
@@ -122,6 +124,7 @@ export function SolveWorkspace() {
   useEffect(() => {
     setActiveQuestionIndex(0);
     setActiveStepIndex(0);
+    setIsVisualizationWarningDismissed(false);
   }, [result?.request_id]);
 
   useEffect(() => {
@@ -368,19 +371,19 @@ export function SolveWorkspace() {
       <section className="space-y-4">
         {result ? (
           <>
-            <Card className="border-border/70">
+            <Card className="border-success/30 bg-success/5">
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="success">Solved</Badge>
-                      {hasQuestionSwitcher ? (
-                        <Badge variant="secondary">
-                          Question {activeQuestionLabel}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <CardTitle className="mt-3">Answer</CardTitle>
+                    {hasQuestionSwitcher ? (
+                      <Badge variant="secondary">
+                        Question {activeQuestionLabel}
+                      </Badge>
+                    ) : null}
+                    <CardTitle className="mt-3 flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5 text-success" />
+                      Answer
+                    </CardTitle>
                   </div>
                 </div>
               </CardHeader>
@@ -394,12 +397,22 @@ export function SolveWorkspace() {
               </CardContent>
             </Card>
 
-            {visualizationWarnings.length ? (
+            {visualizationWarnings.length && !isVisualizationWarningDismissed ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
-                <p className="flex items-center gap-2 font-medium">
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                  Please note
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 font-medium">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    Please note
+                  </p>
+                  <button
+                    aria-label="Close please note"
+                    className="rounded-md p-1 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 dark:hover:bg-amber-900/40"
+                    onClick={() => setIsVisualizationWarningDismissed(true)}
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
                 <ul className="mt-2 space-y-1">
                   {visualizationWarnings.map((warning, index) => (
                     <li key={`${warning}-${index}`}>• {warning}</li>
@@ -459,7 +472,6 @@ export function SolveWorkspace() {
                           : ""}
                         Step {safeActiveStepIndex + 1} of {steps.length}
                       </Badge>
-                      <CheckCircle2 className="h-4 w-4 text-primary" />
                     </div>
                     <div className="flex items-center gap-2">
                       <Button

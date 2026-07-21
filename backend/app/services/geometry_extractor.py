@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from enum import Enum
+from itertools import combinations
 from typing import Any
 
 from pydantic import ValidationError
@@ -15,7 +14,6 @@ from app.core.config import get_settings
 from app.integrations.errors import exception_diagnostics
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
-from app.schemas.common import ProblemType
 from app.schemas.geometry_dsl import (
     GeometryAction,
     GeometryActionType,
@@ -26,9 +24,9 @@ from app.schemas.geometry_dsl import (
     VisualizationEnvironment,
 )
 from app.services.geogebra_command_registry import (
-    GLOBAL_CORE_COMMANDS,
+    CommandSignature,
     GeoGebraCommandRegistry,
-    ROLLED_OUT_GENERIC_COMMANDS,
+    GeoGebraObjectType,
     RetrievedCommand,
 )
 from app.services.geogebra_validator import GeoGebraDSLValidator
@@ -42,41 +40,32 @@ logger = logging.getLogger(__name__)
 GEOMETRY_RETRIEVAL_LIMIT = 10
 
 
-_NAMED_TRIANGLE_PATTERNS = (
-    re.compile(
-        r"(?i:\btriangle\b|tam\s+gi(?:á|a)c)"
-        r"[\s\\()${}]*([A-Z])\s*([A-Z])\s*([A-Z])(?![A-Za-z])"
-    ),
-    re.compile(
-        r"(?<![A-Za-z])([A-Z])\s*([A-Z])\s*([A-Z])(?![A-Za-z])"
-        r"[\s\\()${}]*"
-        r"(?i:(?:is|be)\s+(?:a\s+)?triangle\b)"
-    ),
-)
+def _ordered_geometry_fallback_models(parser_model: str) -> tuple[str, ...]:
+    """Retry the routed NVIDIA model before trying its alternate."""
+
+    preferred = (
+        (parser_model,)
+        if parser_model in NVIDIA_DIRECT_FALLBACK_MODELS
+        else ()
+    )
+    return tuple(dict.fromkeys((*preferred, *NVIDIA_DIRECT_FALLBACK_MODELS)))
 
 
-def _named_triangle_points(text: str) -> list[str] | None:
-    """Return explicit uppercase triangle labels without consuming prose words."""
-
-    for pattern in _NAMED_TRIANGLE_PATTERNS:
-        for match in pattern.finditer(text):
-            points = list(match.groups())
-            if len(set(points)) == 3:
-                return points
-    return None
 
 
 LOCAL_GEOMETRY_EXTRACTION_PROMPT = """
 Convert the math problem into a minimal GeoGebra construction plan.
 Return exactly one JSON object and nothing else. Do not solve or prove the problem.
 Use only the top-level keys summary and dsl. Keep summary at 200 characters or fewer.
-Do not invent coordinates, lengths, labels, or relationships that the problem does not give.
+Do not invent mathematical relationships that the problem does not give. When the
+user explicitly requests a visualization but omits placement or scale, you may choose
+simple finite display coordinates or dimensions solely to make the requested object visible.
 Preserve labels exactly. References may be emitted out of order; trusted code will sort them.
 
 Allowed actions:
 CREATE_POINT, CREATE_LINE, CREATE_CIRCLE, CREATE_POLYGON, INTERSECT,
 MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION,
-and EXECUTE_COMMAND only for a retrieved command listed below.
+DEFINE_OBJECT, and EXECUTE_COMMAND only for a retrieved command listed below.
 
 Required fields for each action (never omit them):
 - CREATE_POINT: action, label; add coordinates only when explicitly given.
@@ -88,8 +77,15 @@ Required fields for each action (never omit them):
 - PERPENDICULAR or PARALLEL: action, label, line, metadata.through_point.
 - ANGLE_BISECTOR: action, label, points with exactly three existing point labels.
 - CREATE_FUNCTION: action, label, equation.
+- DEFINE_OBJECT: action, output, object_type, value. Prefer this over
+  CREATE_FUNCTION for explicit function definitions such as f(x) = x^2.
 - EXECUTE_COMMAND: action, command, arguments, and normally output. Every argument
   must use a typed kind; never put raw GeoGebra syntax in a string.
+When retrieved commands are provided, prefer one minimal EXECUTE_COMMAND action
+that directly represents the request. Match one listed overload exactly. If the
+prompt omits display placement or scale, supply simple finite typed arguments for
+that overload so the requested object is still visible; never leave required
+arguments empty.
 
 Use an empty actions list when no faithful construction can be extracted.
 Omit only optional fields. Never shorten or summarize action objects.
@@ -239,19 +235,26 @@ _NON_LIST_ARGUMENT_SCHEMAS = [
     _string_argument_schema("equation"),
     _INTERVAL_ARGUMENT_SCHEMA,
 ]
-_LIST_ARGUMENT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "kind": {"type": "string", "const": "list"},
-        "items": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {"oneOf": _NON_LIST_ARGUMENT_SCHEMAS},
+def _list_argument_schema(depth: int) -> dict[str, Any]:
+    item_schemas = list(_NON_LIST_ARGUMENT_SCHEMAS)
+    if depth > 1:
+        item_schemas.append(_list_argument_schema(depth - 1))
+    return {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "const": "list"},
+            "items": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {"oneOf": item_schemas},
+            },
         },
-    },
-    "required": ["kind", "items"],
-    "additionalProperties": False,
-}
+        "required": ["kind", "items"],
+        "additionalProperties": False,
+    }
+
+
+_LIST_ARGUMENT_SCHEMA = _list_argument_schema(2)
 
 
 def _generic_action_schema(command_names: list[str]) -> dict[str, Any]:
@@ -272,12 +275,144 @@ def _generic_action_schema(command_names: list[str]) -> dict[str, Any]:
     }
 
 
+_ARGUMENT_SCHEMA_BY_OBJECT_TYPE: dict[GeoGebraObjectType, dict[str, Any]] = {
+    GeoGebraObjectType.POINT: _coordinate_argument_schema("point"),
+    GeoGebraObjectType.NUMBER: _NUMBER_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.ANGLE: _ANGLE_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.VECTOR: _coordinate_argument_schema("vector"),
+    GeoGebraObjectType.TEXT: _TEXT_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.BOOLEAN: _BOOLEAN_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.EQUATION: _string_argument_schema("equation"),
+    GeoGebraObjectType.LIST: _LIST_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.MATRIX: _LIST_ARGUMENT_SCHEMA,
+    GeoGebraObjectType.INTERVAL: _INTERVAL_ARGUMENT_SCHEMA,
+}
+_SELF_CONTAINED_ARGUMENT_TYPES = frozenset(_ARGUMENT_SCHEMA_BY_OBJECT_TYPE)
+
+
+def _signature_is_self_contained(signature: CommandSignature) -> bool:
+    return (
+        signature.normalization_certain
+        and signature.max_arguments is not None
+        and all(
+            bool(expected.intersection(_SELF_CONTAINED_ARGUMENT_TYPES))
+            for expected in signature.expected_types
+        )
+    )
+
+
+def _commands_have_self_contained_overloads(
+    command_signatures: dict[str, tuple[CommandSignature, ...]],
+) -> bool:
+    return bool(command_signatures) and all(
+        any(_signature_is_self_contained(signature) for signature in signatures)
+        for signatures in command_signatures.values()
+    )
+
+
+def _expected_argument_schema(
+    expected_types: frozenset[GeoGebraObjectType],
+) -> dict[str, Any]:
+    options: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for object_type in sorted(expected_types, key=lambda item: item.value):
+        schema = _ARGUMENT_SCHEMA_BY_OBJECT_TYPE.get(
+            object_type, _REFERENCE_ARGUMENT_SCHEMA
+        )
+        fingerprint = json.dumps(schema, sort_keys=True)
+        if fingerprint not in seen:
+            seen.add(fingerprint)
+            options.append(schema)
+    if not options or GeoGebraObjectType.UNKNOWN in expected_types:
+        return {
+            "oneOf": [*_NON_LIST_ARGUMENT_SCHEMAS, _LIST_ARGUMENT_SCHEMA]
+        }
+    return options[0] if len(options) == 1 else {"oneOf": options}
+
+
+def _typed_generic_action_schemas(
+    command_signatures: dict[str, tuple[CommandSignature, ...]],
+) -> list[dict[str, Any]]:
+    variants: list[dict[str, Any]] = []
+    for command_name in sorted(command_signatures, key=str.casefold):
+        for signature in command_signatures[command_name]:
+            if (
+                not signature.normalization_certain
+                or signature.max_arguments is None
+                or len(signature.expected_types) != signature.max_arguments
+            ):
+                continue
+            variants.append(
+                {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "const": "EXECUTE_COMMAND",
+                        },
+                        "output": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$",
+                        },
+                        "command": {"type": "string", "const": command_name},
+                        "arguments": {
+                            "type": "array",
+                            "minItems": signature.min_arguments,
+                            "maxItems": signature.max_arguments,
+                            "prefixItems": [
+                                _expected_argument_schema(expected)
+                                for expected in signature.expected_types
+                            ],
+                        },
+                    },
+                    "required": ["action", "command", "arguments"],
+                    "additionalProperties": False,
+                }
+            )
+    return variants
+
+
+def _definition_action_schemas() -> list[dict[str, Any]]:
+    value_schemas = {
+        "function": _string_argument_schema("equation"),
+        "equation": _string_argument_schema("equation"),
+        "expression": _string_argument_schema("expression"),
+        "number": _NUMBER_ARGUMENT_SCHEMA,
+        "point": _coordinate_argument_schema("point"),
+        "vector": _coordinate_argument_schema("vector"),
+        "list": _LIST_ARGUMENT_SCHEMA,
+        "text": _TEXT_ARGUMENT_SCHEMA,
+        "boolean": _BOOLEAN_ARGUMENT_SCHEMA,
+        "interval": _INTERVAL_ARGUMENT_SCHEMA,
+    }
+    return [
+        {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "const": "DEFINE_OBJECT"},
+                "output": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$",
+                },
+                "object_type": {"type": "string", "const": object_type},
+                "value": value_schema,
+            },
+            "required": ["action", "output", "object_type", "value"],
+            "additionalProperties": False,
+        }
+        for object_type, value_schema in value_schemas.items()
+    ]
+
+
 def geometry_response_schema(
     command_names: list[str] | None = None,
     environment: VisualizationEnvironment = VisualizationEnvironment.geometry_2d,
+    *,
+    generic_commands_only: bool = False,
+    command_signatures: dict[str, tuple[CommandSignature, ...]] | None = None,
 ) -> dict[str, Any]:
     command_names = sorted(set(command_names or []), key=str.casefold)
-    action_schemas = [
+    high_level_action_schemas = [
         _action_schema(
             "CREATE_POINT",
             [],
@@ -339,8 +474,13 @@ def geometry_response_schema(
             ["equation"],
             {"equation": {"type": "string", "minLength": 1, "maxLength": 200}},
         ),
+        *_definition_action_schemas(),
     ]
-    if command_names:
+    action_schemas = [] if generic_commands_only else high_level_action_schemas
+    typed_generic_schemas = _typed_generic_action_schemas(command_signatures or {})
+    if typed_generic_schemas:
+        action_schemas.extend(typed_generic_schemas)
+    elif command_names:
         action_schemas.append(_generic_action_schema(command_names))
     return {
     "type": "object",
@@ -357,7 +497,7 @@ def geometry_response_schema(
                 "environment": {"type": "string", "const": environment.value},
                 "actions": {
                     "type": "array",
-                    "maxItems": 40,
+                    "maxItems": 12 if generic_commands_only else 40,
                     "items": {
                         "oneOf": action_schemas
                     },
@@ -377,7 +517,6 @@ def geometry_response_schema(
     }
 
 
-LOCAL_GEOMETRY_RESPONSE_SCHEMA: dict[str, Any] = geometry_response_schema()
 
 
 def geometry_repair_schema(
@@ -419,9 +558,7 @@ class GeometryProposalValidationError(ValueError):
     failure_code = "model_validation_failure"
 
 
-_MAX_LOCAL_ACTIONS = 40
 _SAFE_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
-_SAFE_FUNCTION_EXPRESSION = re.compile(r"^[0-9A-Za-z_+\-*/^()., ]{1,200}$")
 _STRICT_ACTION_FIELDS: dict[
     GeometryActionType, tuple[frozenset[str], frozenset[str]]
 ] = {
@@ -460,6 +597,10 @@ _STRICT_ACTION_FIELDS: dict[
     GeometryActionType.CREATE_FUNCTION: (
         frozenset({"action", "label", "equation"}),
         frozenset({"action", "label", "equation"}),
+    ),
+    GeometryActionType.DEFINE_OBJECT: (
+        frozenset({"action", "output", "object_type", "value"}),
+        frozenset({"action", "output", "object_type", "value"}),
     ),
     GeometryActionType.EXECUTE_COMMAND: (
         frozenset({"action", "output", "command", "arguments"}),
@@ -518,165 +659,6 @@ class GeometryExtractionResult:
     retrieved_commands: tuple[RetrievedCommand, ...] = ()
 
 
-class VisualizationCapability(str, Enum):
-    no_visualization = "none"
-    geometry_2d = "geometry_2d"
-    graphing = "graphing"
-    graphics_3d = "graphics_3d"
-    cas = "cas"
-    probability = "probability"
-    statistics = "statistics"
-    spreadsheet = "spreadsheet"
-
-
-@dataclass(frozen=True)
-class VisualizationClassification:
-    capability: VisualizationCapability
-    environment: VisualizationEnvironment | None
-    reason: str
-
-    @property
-    def visualizable(self) -> bool:
-        return self.environment is not None
-
-
-def classify_visualization_capability(text: str) -> VisualizationClassification:
-    """Classify only visual structure stated in the prompt, never its answer shape."""
-
-    stripped = text.strip()
-    lowered = stripped.casefold()
-    if not stripped:
-        return VisualizationClassification(
-            VisualizationCapability.no_visualization,
-            None,
-            "the problem statement is empty",
-        )
-
-    if "spreadsheet" in lowered or re.search(r"\bcell\s+[a-z]+\d+\b", lowered):
-        return VisualizationClassification(
-            VisualizationCapability.spreadsheet,
-            VisualizationEnvironment.spreadsheet,
-            "the problem explicitly requests spreadsheet structure",
-        )
-
-    if re.search(
-        r"\b(histogram|box(?:-and-whisker)?\s+plot|boxplot|scatter\s*plot|"
-        r"bar\s+(?:chart|graph)|pie\s+chart|frequency\s+polygon)\b",
-        lowered,
-    ):
-        return VisualizationClassification(
-            VisualizationCapability.statistics,
-            VisualizationEnvironment.statistics,
-            "the problem explicitly names a statistical visualization",
-        )
-
-    if re.search(
-        r"\b(probability\s+(?:tree|distribution|diagram)|tree\s+diagram|"
-        r"normal\s+distribution\s+(?:curve|graph))\b",
-        lowered,
-    ):
-        return VisualizationClassification(
-            VisualizationCapability.probability,
-            VisualizationEnvironment.probability,
-            "the problem explicitly names a probability visualization",
-        )
-
-    geometry_terms = re.search(
-        r"\b(?:point|line|segment|ray|triangle|quadrilateral|rectangle|square|"
-        r"polygon|circle|midpoint|diameter|radius|chord|tangent|secant|angle|"
-        r"perpendicular|parallel|bisector|vertex|vertices|sphere|plane|solid|"
-        r"surface|prism|pyramid|cone|cylinder)\b|"
-        r"tam\s+gi(?:á|a)c|đường\s+tròn|duong\s+tron|đường\s+thẳng|"
-        r"duong\s+thang|đoạn\s+thẳng|doan\s+thang|\bđiểm\b|\bdiem\b|"
-        r"trung\s+điểm|trung\s+diem|đường\s+kính|duong\s+kinh|"
-        r"vuông\s+góc|vuong\s+goc|nội\s+tiếp|noi\s+tiep|\\perp|"
-        r"\\parallel|[⊥∥∠]",
-        stripped,
-        flags=re.IGNORECASE,
-    )
-    has_named_geometry = bool(
-        geometry_terms
-        or re.search(
-            r"\b(?:construct|draw)\s+(?:the\s+)?(?:point|line|circle|triangle|polygon)\b",
-            lowered,
-        )
-    )
-    has_3d_structure = bool(
-        re.search(
-            r"\b(?:3d|three[- ]dimensional|sphere|solid|surface|prism|pyramid|"
-            r"cone|cylinder|plane\s+in\s+space)\b",
-            lowered,
-        )
-    )
-    if has_named_geometry and has_3d_structure:
-        return VisualizationClassification(
-            VisualizationCapability.graphics_3d,
-            VisualizationEnvironment.graphics_3d,
-            "the problem states three-dimensional geometric structure",
-        )
-    if has_named_geometry:
-        return VisualizationClassification(
-            VisualizationCapability.geometry_2d,
-            VisualizationEnvironment.geometry_2d,
-            "the problem states geometric objects or relations",
-        )
-
-    explicit_function = re.search(
-        r"(?:^|[^A-Za-z])(?:y|[A-Za-z][A-Za-z0-9_]*\s*\(\s*[A-Za-z]\s*\))\s*=",
-        stripped,
-        flags=re.IGNORECASE,
-    )
-    explicit_graph_request = re.search(
-        r"\b(?:graph|plot|sketch)\b", lowered
-    ) and re.search(r"[=<>≤≥]|\b(?:function|relation|inequality)\b", lowered)
-    explicit_bivariate_relation = bool(
-        re.search(r"=", stripped)
-        and re.search(r"(?<![A-Za-z])x(?![A-Za-z])", stripped, re.IGNORECASE)
-        and re.search(r"(?<![A-Za-z])y(?![A-Za-z])", stripped, re.IGNORECASE)
-    )
-    inequality_region = re.search(
-        r"\b(?:shade|region|locus|feasible\s+set|solution\s+set)\b",
-        lowered,
-    ) and re.search(r"(?:<=|>=|<|>|≤|≥)", stripped)
-    positional_coordinates = re.search(
-        r"\b(?:point|coordinate|plot|graph)\b.{0,40}"
-        r"\(\s*[-+]?\d+(?:\.\d+)?\s*,\s*[-+]?\d+(?:\.\d+)?\s*\)",
-        stripped,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    implied_named_coordinates = re.search(
-        r"\b[A-Z][A-Za-z0-9_]{0,31}\s*"
-        r"\(\s*[-+]?\d+(?:\.\d+)?\s*,\s*[-+]?\d+(?:\.\d+)?\s*\)",
-        stripped,
-    )
-    if (
-        explicit_function
-        or explicit_graph_request
-        or explicit_bivariate_relation
-        or inequality_region
-        or positional_coordinates
-        or implied_named_coordinates
-    ):
-        return VisualizationClassification(
-            VisualizationCapability.graphing,
-            VisualizationEnvironment.graphing,
-            "the problem states a function, graphable relation, region, locus, or coordinates",
-        )
-
-    if re.search(r"\b(?:use|in|with)\s+(?:a\s+)?cas\b", lowered):
-        return VisualizationClassification(
-            VisualizationCapability.cas,
-            VisualizationEnvironment.cas,
-            "the problem explicitly requests a CAS environment",
-        )
-
-    return VisualizationClassification(
-        VisualizationCapability.no_visualization,
-        None,
-        "the problem states no geometric, functional, positional, or chart structure",
-    )
-
-
 class GeometryExtractor:
     def __init__(
         self,
@@ -696,83 +678,30 @@ class GeometryExtractor:
     async def extract(
         self,
         text: str,
-        problem_type: ProblemType,
         parser_model: str,
         *,
+        environment: VisualizationEnvironment,
+        semantic_query_terms: tuple[str, ...] = (),
         request_id: str | None = None,
     ) -> GeometryExtractionResult:
-        classification = self.classify_visualization(text)
-        if not classification.visualizable:
-            logger.info(
-                "Visualization extraction skipped request_id=%s capability=%s reason=%s",
-                request_id,
-                classification.capability.value,
-                classification.reason,
-            )
-            return GeometryExtractionResult(
-                dsl=GeometryDSL(
-                    version="1.1",
-                    space="euclidean_2d",
-                    environment=VisualizationEnvironment.geometry_2d,
-                    actions=[],
-                    render_hints=RenderHints(),
-                ),
-                summary=None,
-                warnings=[],
-            )
-
-        environment = classification.environment
-        if environment is None:  # Kept explicit for static type narrowing.
-            return GeometryExtractionResult(
-                dsl=GeometryDSL(
-                    version="1.1",
-                    space="euclidean_2d",
-                    environment=VisualizationEnvironment.geometry_2d,
-                    actions=[],
-                    render_hints=RenderHints(),
-                ),
-                summary=None,
-                warnings=[],
-            )
-        retrieved = tuple(
-            command
-            for command in self.registry.search(
-                text, environment, limit=GEOMETRY_RETRIEVAL_LIMIT
-            )
-            if command.name in ROLLED_OUT_GENERIC_COMMANDS
+        retrieved = self._retrieve_commands(
+            text,
+            environment,
+            semantic_query_terms=semantic_query_terms,
         )
-        allowed_commands = frozenset(command.name for command in retrieved)
-
         if parser_model.startswith("local:"):
-            if problem_type is ProblemType.algebra:
-                deterministic = self._extract_heuristically(
-                    text,
-                    problem_type,
-                    environment=environment,
-                    allowed_commands=allowed_commands,
-                    retrieved_commands=retrieved,
-                )
-                if deterministic.dsl.actions:
-                    return deterministic
             if self._local_geometry_parser_enabled() and len(text.strip()) <= 4_000:
                 try:
                     return await self._extract_with_local_llama(
                         text, environment, retrieved, request_id=request_id
                     )
                 except ValueError:
-                    fallback = self._extract_heuristically(
-                        text,
-                        problem_type,
-                        environment=environment,
-                        allowed_commands=allowed_commands,
-                        retrieved_commands=retrieved,
+                    return self._empty_extraction(
+                        environment,
+                        retrieved,
+                        "The local visualization model produced an invalid plan; "
+                        "no visualization was generated.",
                     )
-                    fallback.warnings.insert(
-                        0,
-                        "The model-generated visualization plan failed validation; "
-                        "a deterministic fallback was used.",
-                    )
-                    return fallback
                 except Exception as exc:
                     diagnostics = exception_diagnostics(exc)
                     logger.warning(
@@ -785,12 +714,11 @@ class GeometryExtractor:
                         diagnostics.status_code,
                         diagnostics.response_body,
                     )
-            return self._extract_heuristically(
-                text,
-                problem_type,
-                environment=environment,
-                allowed_commands=allowed_commands,
-                retrieved_commands=retrieved,
+            return self._empty_extraction(
+                environment,
+                retrieved,
+                "The local visualization model was unavailable; no visualization "
+                "was generated.",
             )
 
         if self.nvidia_client.enabled:
@@ -822,7 +750,6 @@ class GeometryExtractor:
                 )
                 return await self._fallback_after_remote_failure(
                     text,
-                    problem_type,
                     environment,
                     retrieved,
                     request_id=request_id,
@@ -839,7 +766,6 @@ class GeometryExtractor:
             )
             return await self._fallback_after_remote_failure(
                 text,
-                problem_type,
                 environment,
                 retrieved,
                 request_id=request_id,
@@ -847,28 +773,66 @@ class GeometryExtractor:
                 failure_code="remote_request_failure",
             )
 
-        return self._extract_heuristically(
-            text,
-            problem_type,
-            environment=environment,
-            allowed_commands=allowed_commands,
-            retrieved_commands=retrieved,
+        return self._empty_extraction(
+            environment,
+            retrieved,
+            "No model-backed visualization parser was available; no visualization "
+            "was generated.",
         )
 
-    def classify_environment(
-        self, text: str, problem_type: ProblemType
-    ) -> VisualizationEnvironment | None:
-        _ = problem_type
-        return self.classify_visualization(text).environment
-
-    def classify_visualization(self, text: str) -> VisualizationClassification:
-        return classify_visualization_capability(text)
+    @staticmethod
+    def _empty_extraction(
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+        warning: str,
+    ) -> GeometryExtractionResult:
+        return GeometryExtractionResult(
+            dsl=GeometryDSL(
+                version="1.1",
+                space=(
+                    "euclidean_3d"
+                    if environment is VisualizationEnvironment.graphics_3d
+                    else "euclidean_2d"
+                ),
+                environment=environment,
+                actions=[],
+                render_hints=RenderHints(),
+            ),
+            summary=None,
+            warnings=[warning],
+            allowed_commands=frozenset(command.name for command in retrieved),
+            retrieved_commands=retrieved,
+        )
 
     def _local_geometry_parser_enabled(self) -> bool:
         return bool(
             getattr(self.settings, "local_llama_geometry_extraction_enabled", False)
             and getattr(self.llama_client, "enabled", False)
             and getattr(self.llama_client, "available", True)
+        )
+
+    def _retrieve_commands(
+        self,
+        text: str,
+        environment: VisualizationEnvironment,
+        *,
+        semantic_query_terms: tuple[str, ...] = (),
+    ) -> tuple[RetrievedCommand, ...]:
+        """Search original text plus bounded semantic terms selected by the router AI."""
+
+        terms = tuple(
+            term.strip()
+            for term in semantic_query_terms[:12]
+            if isinstance(term, str) and term.strip()
+        )
+        expanded_query = f"{text}\n{' '.join(terms)}" if terms else text
+
+        return tuple(
+            self.registry.search(
+                expanded_query,
+                environment,
+                limit=GEOMETRY_RETRIEVAL_LIMIT,
+            )
         )
 
     async def _extract_with_local_llama(
@@ -880,10 +844,40 @@ class GeometryExtractor:
         request_id: str | None = None,
     ) -> GeometryExtractionResult:
         command_names = sorted(
-            {command.name for command in retrieved}.union(GLOBAL_CORE_COMMANDS),
-            key=str.casefold,
+            {command.name for command in retrieved}, key=str.casefold
         )
         discovery_context = self._format_command_context(retrieved)
+        command_signatures: dict[str, tuple[CommandSignature, ...]] = {}
+        for command in retrieved:
+            definition = self.registry.lookup(command.name)
+            if definition is None:
+                continue
+            retrieved_signatures = set(command.signatures)
+            command_signatures[command.name] = tuple(
+                overload.signature
+                for overload in definition.runtime_eligible_overloads(environment)
+                if overload.signature.original in retrieved_signatures
+            )
+        generic_commands_only = (
+            environment
+            not in {
+                VisualizationEnvironment.geometry_2d,
+                VisualizationEnvironment.graphing,
+            }
+            and _commands_have_self_contained_overloads(command_signatures)
+        )
+        schema_signatures = (
+            {
+                command_name: tuple(
+                    signature
+                    for signature in signatures
+                    if _signature_is_self_contained(signature)
+                )
+                for command_name, signatures in command_signatures.items()
+            }
+            if generic_commands_only
+            else command_signatures
+        )
         payload = await self.llama_client.generate_json(
             prompt=(
                 f"{LOCAL_GEOMETRY_EXTRACTION_PROMPT}\n\n"
@@ -894,10 +888,16 @@ class GeometryExtractor:
             max_tokens=int(
                 getattr(self.settings, "local_llama_geometry_max_tokens", 1_200)
             ),
+            thinking_budget_tokens=0,
             timeout_seconds=float(
                 getattr(self.settings, "local_llama_geometry_timeout_seconds", 8.0)
             ),
-            json_schema=geometry_response_schema(command_names, environment),
+            json_schema=geometry_response_schema(
+                command_names,
+                environment,
+                generic_commands_only=generic_commands_only,
+                command_signatures=schema_signatures,
+            ),
             operation="local_geometry_extraction",
             trace_id=request_id,
         )
@@ -908,7 +908,6 @@ class GeometryExtractor:
             source="Local llama-server",
             allowed_command_names=set(command_names),
         )
-        dsl = self._sanitize_local_dsl(text, dsl)
         validation = self.validator.validate(
             dsl, allowed_command_names={command.name for command in retrieved}
         )
@@ -917,6 +916,7 @@ class GeometryExtractor:
             for issue in validation.issues
             if issue.severity is ValidationSeverity.error
         ]
+        issues.extend(self._validate_local_prompt_grounding(text, dsl))
         issues.extend(self._validate_intent_alignment(text, dsl))
         if issues:
             raise ValueError("Invalid local geometry DSL: " + "; ".join(issues))
@@ -943,10 +943,7 @@ class GeometryExtractor:
         timeout_seconds: float | None = None,
     ) -> GeometryExtractionResult:
         allowed_command_names = {command.name for command in retrieved}
-        command_names = sorted(
-            allowed_command_names.union(GLOBAL_CORE_COMMANDS),
-            key=str.casefold,
-        )
+        command_names = sorted(allowed_command_names, key=str.casefold)
         discovery_context = self._format_command_context(retrieved)
         selected_client = completion_client or self.nvidia_client
         payload = await selected_client.complete_json(
@@ -956,9 +953,12 @@ class GeometryExtractor:
                 "top-level keys summary and dsl; keep summary at 200 characters or fewer. Use DSL "
                 "version 1.1 with version, space, environment, actions, render_hints. "
                 "Supported actions: CREATE_POINT, CREATE_LINE, CREATE_CIRCLE, CREATE_POLYGON, INTERSECT, "
-                "MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION, EXECUTE_COMMAND. "
+                "MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION, DEFINE_OBJECT, "
+                "EXECUTE_COMMAND. Prefer DEFINE_OBJECT for explicit function definitions. "
                 "EXECUTE_COMMAND arguments must be typed objects and its command must appear in the "
-                "retrieved list. Never return raw GeoGebra commands or JavaScript.\n\n"
+                "retrieved list. Never return raw GeoGebra commands or JavaScript. When an explicit "
+                "visualization request omits placement or scale, choose simple finite display "
+                "coordinates or dimensions without implying extra mathematical relationships.\n\n"
                 f"Environment: {environment.value}\nRetrieved commands:\n{discovery_context}"
             ),
             user_prompt=text,
@@ -1132,8 +1132,7 @@ class GeometryExtractor:
             for index in sorted(issues_by_index)
         ]
         command_names = sorted(
-            {command.name for command in retrieved}.union(GLOBAL_CORE_COMMANDS),
-            key=str.casefold,
+            {command.name for command in retrieved}, key=str.casefold
         )
         discovery_context = self._format_command_context(retrieved)
         try:
@@ -1222,7 +1221,6 @@ class GeometryExtractor:
     async def _fallback_after_remote_failure(
         self,
         text: str,
-        problem_type: ProblemType,
         environment: VisualizationEnvironment,
         retrieved: tuple[RetrievedCommand, ...],
         *,
@@ -1279,9 +1277,8 @@ class GeometryExtractor:
                 )
 
         if self.nvidia_client.enabled:
-            for attempt_number, native_model in enumerate(
-                NVIDIA_DIRECT_FALLBACK_MODELS, start=1
-            ):
+            fallback_models = _ordered_geometry_fallback_models(parser_model)
+            for attempt_number, native_model in enumerate(fallback_models, start=1):
                 try:
                     timeout_seconds = remote_model_timeout_seconds(
                         self.settings,
@@ -1294,7 +1291,7 @@ class GeometryExtractor:
                         request_id,
                         native_model,
                         attempt_number,
-                        len(NVIDIA_DIRECT_FALLBACK_MODELS),
+                        len(fallback_models),
                         timeout_seconds,
                     )
                     fallback = await self._extract_with_llm(
@@ -1333,54 +1330,17 @@ class GeometryExtractor:
                         request_id,
                         native_model,
                         attempt_number,
-                        len(NVIDIA_DIRECT_FALLBACK_MODELS),
+                        len(fallback_models),
                         diagnostics.error_type,
                         diagnostics.error_message,
                         diagnostics.status_code,
                         diagnostics.response_body,
                     )
 
-        deterministic = self._extract_heuristically(
-            text,
-            problem_type,
-            environment=environment,
-            allowed_commands=frozenset(command.name for command in retrieved),
-            retrieved_commands=retrieved,
-        )
-        if deterministic.dsl.actions:
-            deterministic.warnings.insert(
-                0,
-                (
-                    "No eligible remote provider supported the required visualization "
-                    "schema, and the model fallbacks were unavailable; a limited deterministic "
-                    "construction was used."
-                    if provider_unavailable
-                    else (
-                        "The model-generated visualization plan failed validation; a limited "
-                        "deterministic construction was used."
-                        if model_output_invalid
-                        else "Model-backed visualization extraction was unavailable; a limited "
-                        "deterministic construction was used."
-                    )
-                ),
-            )
-            return deterministic
-
-        return GeometryExtractionResult(
-            dsl=GeometryDSL(
-                version="1.1",
-                space=(
-                    "euclidean_3d"
-                    if environment is VisualizationEnvironment.graphics_3d
-                    else "euclidean_2d"
-                ),
-                environment=environment,
-                actions=[],
-                render_hints=RenderHints(),
-            ),
-            summary=None,
-            warnings=[
-                (
+        return self._empty_extraction(
+            environment,
+            retrieved,
+            (
                     "No eligible remote provider supported the required visualization "
                     "schema, and no validated fallback produced a plan; no visualization "
                     "was generated."
@@ -1392,10 +1352,7 @@ class GeometryExtractor:
                         else "The remote visualization model failed before producing a valid plan, "
                         "and no validated fallback produced one; no visualization was generated."
                     )
-                )
-            ],
-            allowed_commands=frozenset(command.name for command in retrieved),
-            retrieved_commands=retrieved,
+                ),
         )
 
     def _log_remote_validation_outcome(
@@ -1459,7 +1416,7 @@ class GeometryExtractor:
         raw_argument: Any,
         *,
         source: str,
-        allow_list: bool = True,
+        remaining_list_depth: int = 2,
     ) -> None:
         if not isinstance(raw_argument, dict):
             raise ValueError(f"{source} command argument must be an object.")
@@ -1467,7 +1424,7 @@ class GeometryExtractor:
         if not isinstance(kind, str):
             raise ValueError(f"{source} command argument kind must be a string.")
         contract = _STRICT_ARGUMENT_FIELDS.get(kind)
-        if contract is None or (kind == "list" and not allow_list):
+        if contract is None or (kind == "list" and remaining_list_depth < 1):
             raise ValueError(f"{source} command argument has unsupported kind {kind!r}.")
         allowed_fields, required_fields = contract
         actual_fields = set(raw_argument)
@@ -1488,7 +1445,7 @@ class GeometryExtractor:
                 self._validate_strict_argument_payload(
                     item,
                     source=source,
-                    allow_list=False,
+                    remaining_list_depth=remaining_list_depth - 1,
                 )
 
     def _parse_strict_proposal_action(
@@ -1590,6 +1547,10 @@ class GeometryExtractor:
                 )
             for argument in arguments:
                 self._validate_strict_argument_payload(argument, source=source)
+        elif action_type is GeometryActionType.DEFINE_OBJECT:
+            self._validate_strict_argument_payload(
+                raw_action.get("value"), source=source
+            )
 
         return GeometryAction.model_validate(raw_action)
 
@@ -1709,11 +1670,15 @@ class GeometryExtractor:
             )
         return "\n".join(lines)
 
-    def _sanitize_local_dsl(self, text: str, dsl: GeometryDSL) -> GeometryDSL:
-        sanitized = dsl.model_copy(deep=True)
+    def _validate_local_prompt_grounding(
+        self, text: str, dsl: GeometryDSL
+    ) -> list[str]:
+        """Reject ungrounded local-model coordinates without rewriting its plan."""
+
+        issues: list[str] = []
         number = r"[-+]?\d+(?:\.\d+)?"
 
-        for action in sanitized.actions:
+        for action in dsl.actions:
             if (
                 action.action is not GeometryActionType.CREATE_POINT
                 or action.coordinates is None
@@ -1728,210 +1693,41 @@ class GeometryExtractor:
                 text,
                 flags=re.IGNORECASE,
             )
-            action.coordinates = (
-                (float(coordinate_match.group(1)), float(coordinate_match.group(2)))
-                if coordinate_match
-                else None
-            )
-
-        created_points = {
-            action.label
-            for action in sanitized.actions
-            if action.action is GeometryActionType.CREATE_POINT and action.label
-        }
-        used_labels = {action.label for action in sanitized.actions if action.label}
-
-        center_match = re.search(
-            rf"(?i:(?:circle\s+with\s+)?center)\s+([A-Z])\s+(?i:at)\s*"
-            rf"\(\s*({number})\s*,\s*({number})\s*\)",
-            text,
-        )
-        if center_match:
-            center_label = center_match.group(1).upper()
-            circle_actions = [
-                action
-                for action in sanitized.actions
-                if action.action is GeometryActionType.CREATE_CIRCLE
-            ]
-            if circle_actions:
-                if center_label not in created_points:
-                    center_action = GeometryAction(
-                        action=GeometryActionType.CREATE_POINT,
-                        label=center_label,
-                        coordinates=(
-                            float(center_match.group(2)),
-                            float(center_match.group(3)),
-                        ),
-                    )
-                    first_circle_index = sanitized.actions.index(circle_actions[0])
-                    sanitized.actions.insert(first_circle_index, center_action)
-                    created_points.add(center_label)
-                    used_labels.add(center_label)
-
-                for circle in circle_actions:
-                    circle.center = center_label
-                    if circle.label == center_label:
-                        circle.label = self._unique_label("c", used_labels)
-                        used_labels.add(circle.label)
-
-        triangle_points = _named_triangle_points(text)
-        has_polygon = any(
-            action.action is GeometryActionType.CREATE_POLYGON
-            for action in sanitized.actions
-        )
-        if triangle_points and not has_polygon:
-            if all(label in created_points for label in triangle_points):
-                polygon_label = self._unique_label(
-                    "poly" + "".join(triangle_points), used_labels
+            if coordinate_match is None:
+                issues.append(
+                    f"Point '{action.label}' has coordinates that are not explicitly "
+                    "stated in the prompt."
                 )
-                sanitized.actions.append(
-                    GeometryAction(
-                        action=GeometryActionType.CREATE_POLYGON,
-                        label=polygon_label,
-                        points=triangle_points,
-                    )
-                )
-
-        return sanitized
-
-    def _unique_label(self, preferred: str, used_labels: set[str]) -> str:
-        if preferred not in used_labels:
-            return preferred
-        suffix = 1
-        while f"{preferred}{suffix}" in used_labels:
-            suffix += 1
-        return f"{preferred}{suffix}"
-
-    def _validate_local_dsl(self, dsl: GeometryDSL) -> list[str]:
-        issues: list[str] = []
-        created_labels: set[str] = set()
-
-        if dsl.space != "euclidean_2d":
-            issues.append("Only euclidean_2d constructions are supported.")
-        if not dsl.actions:
-            issues.append("A visualizable construction must contain at least one action.")
-        elif len(dsl.actions) > _MAX_LOCAL_ACTIONS:
-            issues.append(
-                f"A construction may contain at most {_MAX_LOCAL_ACTIONS} actions."
-            )
-
-        for index, action in enumerate(dsl.actions, start=1):
-            label = (action.label or "").strip()
-            if not _SAFE_LABEL.fullmatch(label):
-                issues.append(f"Action {index} has an invalid or missing label.")
-                continue
-            if label in created_labels:
-                issues.append(f"Action {index} redefines label '{label}'.")
-                continue
-
-            references: list[str] = []
-            if action.action is GeometryActionType.CREATE_POINT:
-                if action.coordinates and not all(
-                    math.isfinite(value) for value in action.coordinates
-                ):
-                    issues.append(f"Point '{label}' has non-finite coordinates.")
-
-            elif action.action is GeometryActionType.CREATE_LINE:
-                references = list(action.points or action.through or [])[:2]
-                if len(references) < 2:
-                    issues.append(f"Line '{label}' requires two points.")
-
-            elif action.action is GeometryActionType.CREATE_CIRCLE:
-                if action.center and action.radius is not None:
-                    references = [action.center]
-                    if not math.isfinite(action.radius) or action.radius <= 0:
-                        issues.append(f"Circle '{label}' requires a positive finite radius.")
-                else:
-                    references = list(action.through or [])[:2]
-                    if len(references) < 2:
-                        issues.append(
-                            f"Circle '{label}' requires a center/radius or two points."
-                        )
-
-            elif action.action is GeometryActionType.CREATE_POLYGON:
-                references = list(action.points)
-                if len(references) < 3:
-                    issues.append(f"Polygon '{label}' requires at least three points.")
-
-            elif action.action is GeometryActionType.INTERSECT:
-                objects = action.metadata.get("objects", [])
-                references = list(objects[:2]) if isinstance(objects, list) else []
-                if len(references) < 2:
-                    issues.append(f"Intersection '{label}' requires two objects.")
-
-            elif action.action is GeometryActionType.MIDPOINT:
-                references = list(action.points)[:2]
-                if len(references) < 2:
-                    issues.append(f"Midpoint '{label}' requires two points.")
-
-            elif action.action in {
-                GeometryActionType.PERPENDICULAR,
-                GeometryActionType.PARALLEL,
-            }:
-                through_point = action.metadata.get("through_point")
-                reference_line = action.line or action.metadata.get("reference_line")
-                references = [
-                    value
-                    for value in (through_point, reference_line)
-                    if isinstance(value, str) and value
-                ]
-                if len(references) < 2:
-                    issues.append(
-                        f"{action.action.value} '{label}' requires a point and a line."
-                    )
-
-            elif action.action is GeometryActionType.ANGLE_BISECTOR:
-                references = list(action.points)[:3]
-                if len(references) < 3:
-                    issues.append(f"Angle bisector '{label}' requires three points.")
-
-            elif action.action is GeometryActionType.CREATE_FUNCTION:
-                equation = (action.equation or "").strip()
-                if not _SAFE_FUNCTION_EXPRESSION.fullmatch(equation):
-                    issues.append(f"Function '{label}' has an unsafe expression.")
-                else:
-                    identifiers = {
-                        token.lower()
-                        for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", equation)
-                    }
-                    unsupported = identifiers - {
-                        "x",
-                        "sin",
-                        "cos",
-                        "tan",
-                        "sqrt",
-                        "abs",
-                        "exp",
-                        "log",
-                        "ln",
-                        "pi",
-                        "e",
-                    }
-                    if unsupported:
-                        issues.append(
-                            f"Function '{label}' uses unsupported identifiers: "
-                            + ", ".join(sorted(unsupported))
-                        )
-
-            for reference in references:
-                if not isinstance(reference, str) or not _SAFE_LABEL.fullmatch(reference):
-                    issues.append(f"Action {index} has an invalid object reference.")
-                elif reference not in created_labels:
-                    issues.append(
-                        f"Action {index} references undefined object '{reference}'."
-                    )
-
-            created_labels.add(label)
 
         return issues
 
     def _validate_intent_alignment(self, text: str, dsl: GeometryDSL) -> list[str]:
         action_types = {action.action for action in dsl.actions}
+        has_function_definition = any(
+            action.action is GeometryActionType.DEFINE_OBJECT
+            and action.object_type is not None
+            and action.object_type.value == "function"
+            for action in dsl.actions
+        )
         generic_commands = {
             (action.command or "").casefold()
             for action in dsl.actions
             if action.action is GeometryActionType.EXECUTE_COMMAND
         }
+        line_edges = {
+            frozenset(action.points)
+            for action in dsl.actions
+            if action.action is GeometryActionType.CREATE_LINE
+            and len(action.points) == 2
+        }
+        line_vertices = set().union(*line_edges) if line_edges else set()
+        has_triangle_edges = any(
+            all(
+                frozenset(edge) in line_edges
+                for edge in combinations(vertices, 2)
+            )
+            for vertices in combinations(line_vertices, 3)
+        )
         expected_actions: list[tuple[GeometryActionType, str]] = []
 
         if re.search(
@@ -1967,19 +1763,35 @@ class GeometryExtractor:
         ):
             expected_actions.append((GeometryActionType.PARALLEL, "a parallel"))
 
-        return [
-            f"The prompt requests {description}, but the DSL has no {action.value} action."
-            for action, description in expected_actions
-            if action not in action_types
-            and {
-                GeometryActionType.CREATE_CIRCLE: "circle",
-                GeometryActionType.MIDPOINT: "midpoint",
-                GeometryActionType.PERPENDICULAR: "perpendicularline",
-                GeometryActionType.PARALLEL: "parallelline",
-                GeometryActionType.CREATE_FUNCTION: "function",
-            }.get(action)
-            not in generic_commands
-        ]
+        generic_equivalents = {
+            GeometryActionType.CREATE_POLYGON: "polygon",
+            GeometryActionType.CREATE_CIRCLE: "circle",
+            GeometryActionType.MIDPOINT: "midpoint",
+            GeometryActionType.PERPENDICULAR: "perpendicularline",
+            GeometryActionType.PARALLEL: "parallelline",
+            GeometryActionType.CREATE_FUNCTION: "function",
+        }
+
+        issues: list[str] = []
+        for action, description in expected_actions:
+            represented = (
+                action in action_types
+                or generic_equivalents.get(action) in generic_commands
+                or (
+                    action is GeometryActionType.CREATE_FUNCTION
+                    and has_function_definition
+                )
+                or (
+                    action is GeometryActionType.CREATE_POLYGON
+                    and has_triangle_edges
+                )
+            )
+            if not represented:
+                issues.append(
+                    f"The prompt requests {description}, but the construction plan "
+                    f"has no action representing it ({action.value})."
+                )
+        return issues
 
 
 
@@ -1988,241 +1800,3 @@ class GeometryExtractor:
             return None
         text = str(value).strip()
         return text[:200] or None
-
-    def _extract_heuristically(
-        self,
-        text: str,
-        problem_type: ProblemType,
-        *,
-        environment: VisualizationEnvironment | None = None,
-        allowed_commands: frozenset[str] = frozenset(),
-        retrieved_commands: tuple[RetrievedCommand, ...] = (),
-    ) -> GeometryExtractionResult:
-        environment = (
-            environment
-            or self.classify_environment(text, problem_type)
-            or VisualizationEnvironment.geometry_2d
-        )
-        lowered = text.lower()
-        actions: list[GeometryAction] = []
-        warnings: list[str] = []
-        summary: str | None = None
-
-        def has_point(label: str) -> bool:
-            return any(
-                action.action is GeometryActionType.CREATE_POINT
-                and action.label == label.upper()
-                for action in actions
-            )
-
-        def ensure_point(label: str) -> None:
-            label = label.upper()
-            if not has_point(label):
-                actions.append(
-                    GeometryAction(action=GeometryActionType.CREATE_POINT, label=label)
-                )
-
-        function_match = re.search(
-            r"(?:y|f\s*\(\s*x\s*\))\s*=\s*([0-9xX+\-*/^²().\s]+)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if function_match:
-            equation = self._clean_equation(function_match.group(1))
-            actions.append(
-                GeometryAction(
-                    action=GeometryActionType.CREATE_FUNCTION,
-                    label="f",
-                    equation=equation,
-                )
-            )
-            summary = "Interactive function graph"
-
-        triangle_points = _named_triangle_points(text)
-        if triangle_points:
-            points = triangle_points
-            for point in points:
-                actions.append(
-                    GeometryAction(action=GeometryActionType.CREATE_POINT, label=point)
-                )
-            actions.append(
-                GeometryAction(
-                    action=GeometryActionType.CREATE_POLYGON,
-                    label="poly1",
-                    points=points,
-                )
-            )
-            summary = summary or "Triangle construction"
-
-        circle_match = re.search(
-            r"(?i:circle\s+(?:with|has)\s+center)\s+([A-Z])"
-            r"(?:\s+(?i:at)\s*\(([-\d.]+),\s*([-\d.]+)\))?"
-            r"(?:\s+(?i:and))?\s+(?i:radius)\s*([-\d.]+)",
-            text,
-        )
-        if circle_match:
-            center_label = circle_match.group(1).upper()
-            x_coord = circle_match.group(2)
-            y_coord = circle_match.group(3)
-            radius = float(circle_match.group(4))
-            point_action = GeometryAction(
-                action=GeometryActionType.CREATE_POINT, label=center_label
-            )
-            if x_coord and y_coord:
-                point_action.coordinates = (float(x_coord), float(y_coord))
-            actions.append(point_action)
-            actions.append(
-                GeometryAction(
-                    action=GeometryActionType.CREATE_CIRCLE,
-                    label="c",
-                    center=center_label,
-                    radius=radius,
-                )
-            )
-            summary = summary or "Circle construction"
-
-        has_circle = any(
-            action.action is GeometryActionType.CREATE_CIRCLE for action in actions
-        )
-        if not has_circle:
-            center_match = re.search(
-                r"(?:\(\(?\s*([A-Z])\s*[;,.]\s*(?i:R)\s*\)?\)?|"
-                r"(?i:\bcenter\b)\s+([A-Z])(?![A-Za-z]))",
-                text,
-            )
-            center_label = None
-            if center_match:
-                center_label = center_match.group(1) or center_match.group(2)
-            if center_label:
-                center_label = center_label.upper()
-                ensure_point(center_label)
-                through_point = "B" if has_point("B") else None
-                if through_point:
-                    actions.append(
-                        GeometryAction(
-                            action=GeometryActionType.CREATE_CIRCLE,
-                            label="c",
-                            through=[center_label, through_point],
-                        )
-                    )
-                    summary = summary or "Circle construction"
-
-        explicit_point_pattern = re.finditer(
-            r"(?i:\bpoint)\s+([A-Z])\s+(?i:at|=)\s*"
-            r"\(([-\d.]+),\s*([-\d.]+)\)",
-            text,
-        )
-        for match in explicit_point_pattern:
-            actions.append(
-                GeometryAction(
-                    action=GeometryActionType.CREATE_POINT,
-                    label=match.group(1).upper(),
-                    coordinates=(float(match.group(2)), float(match.group(3))),
-                )
-            )
-
-        midpoint_match = re.search(
-            r"(?i:\bmidpoint\s+of)\s+([A-Z])([A-Z])(?![A-Za-z])", text
-        )
-        if midpoint_match:
-            p1, p2 = midpoint_match.group(1).upper(), midpoint_match.group(2).upper()
-            ensure_point(p1)
-            ensure_point(p2)
-            actions.append(
-                GeometryAction(
-                    action=GeometryActionType.MIDPOINT,
-                    label="M",
-                    points=[p1, p2],
-                )
-            )
-            summary = summary or "Midpoint construction"
-
-        if "perpendicular bisector" in lowered:
-            segment_match = re.search(
-                r"(?i:\bperpendicular\s+bisector\s+of)\s+"
-                r"([A-Z])([A-Z])(?![A-Za-z])",
-                text,
-            )
-            if segment_match:
-                p1, p2 = segment_match.group(1).upper(), segment_match.group(2).upper()
-                ensure_point(p1)
-                ensure_point(p2)
-                actions.append(
-                    GeometryAction(
-                        action=GeometryActionType.MIDPOINT, label="M", points=[p1, p2]
-                    )
-                )
-                actions.append(
-                    GeometryAction(
-                        action=GeometryActionType.CREATE_LINE,
-                        label="l1",
-                        points=[p1, p2],
-                    )
-                )
-                actions.append(
-                    GeometryAction(
-                        action=GeometryActionType.PERPENDICULAR,
-                        label="pb",
-                        line="l1",
-                        metadata={"through_point": "M"},
-                    )
-                )
-                summary = summary or "Perpendicular bisector construction"
-
-        if not actions and problem_type is ProblemType.geometry:
-            warnings.append(
-                "No deterministic geometry pattern was recognized, so no visualization was generated."
-            )
-
-        if (
-            not actions
-            and problem_type is ProblemType.algebra
-            and self._looks_graphable(text)
-        ):
-            warnings.append("No graphable expression was detected in the prompt.")
-
-        return GeometryExtractionResult(
-            dsl=GeometryDSL(
-                version="1.1",
-                space=(
-                    "euclidean_3d"
-                    if environment is VisualizationEnvironment.graphics_3d
-                    else "euclidean_2d"
-                ),
-                environment=environment,
-                actions=actions,
-                render_hints=RenderHints(),
-            ),
-            summary=summary,
-            warnings=warnings,
-            allowed_commands=allowed_commands,
-            retrieved_commands=retrieved_commands,
-        )
-
-    def _looks_like_geometry_problem(self, text: str) -> bool:
-        geometry_terms = re.search(
-            r"\btriangle\b|\bcircle\b|\bmidpoint\b|\bdiameter\b|"
-            r"tam\s+gi(?:á|a)c|đường\s+tròn|duong\s+tron|trung\s+điểm|"
-            r"đường\s+kính|duong\s+kinh|vuông\s+góc|vuong\s+goc|"
-            r"nội\s+tiếp|noi\s+tiep|\\perp|⊥",
-            text,
-            flags=re.IGNORECASE,
-        )
-        point_labels = {
-            label
-            for token in re.findall(r"\b[A-Z]{1,8}\b", text)
-            for label in token
-        }
-        return bool(geometry_terms and len(point_labels) >= 2)
-
-    def _looks_graphable(self, text: str) -> bool:
-        return bool(
-            re.search(
-                r"(?:y|f\s*\(\s*x\s*\))\s*=\s*[0-9xX+\-*/^²().\s]+",
-                text,
-                flags=re.IGNORECASE,
-            )
-        )
-
-    def _clean_equation(self, expression: str) -> str:
-        return expression.replace("²", "^2").replace("−", "-").strip(" .,:;?\n\t")

@@ -8,10 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import router as api_router
 from app.core.config import get_settings
+from app.db import models as _models  # noqa: F401 -- Register SQLAlchemy models.
 from app.db.base import Base
-from app.db.models.problem_attempt import ProblemAttempt  # noqa: F401
-from app.db.models.solver_run import SolverRun  # noqa: F401
-from app.db.models.visualization_artifact import VisualizationArtifact  # noqa: F401
 from app.db.session import engine
 from app.integrations.llama_client import LlamaClient
 
@@ -48,7 +46,7 @@ app = FastAPI(
     title=settings.app_name,
     debug=settings.app_debug,
     version="2.0.0",
-    description="IntoMath 2.0 backend for structured math solving and deterministic visualization.",
+    description="IntoMath backend for structured math solving and validated visualization.",
     lifespan=lifespan,
 )
 
@@ -63,7 +61,7 @@ app.add_middleware(
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"message": "IntoMath 2.0 API is running"}
+    return {"message": "IntoMath API is running"}
 
 
 app.include_router(api_router, prefix="/api/v1")

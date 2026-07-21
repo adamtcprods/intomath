@@ -16,10 +16,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.schemas.geometry_dsl import GeometryDSL, ValidationSeverity  # noqa: E402
-from app.services.geogebra_command_registry import (  # noqa: E402
-    ROLLED_OUT_GENERIC_COMMANDS,
-    GeoGebraCommandRegistry,
-)
+from app.services.geogebra_command_registry import GeoGebraCommandRegistry  # noqa: E402
 from app.services.geogebra_translator import GeoGebraTranslator  # noqa: E402
 from app.services.geometry_extractor import GEOMETRY_RETRIEVAL_LIMIT  # noqa: E402
 
@@ -93,7 +90,6 @@ def evaluate() -> dict[str, Any]:
                     for command in registry.search(
                         case["prompt"], environment, limit=limit
                     )
-                    if command.name in ROLLED_OUT_GENERIC_COMMANDS
                 ]
                 hits = len(expected_commands.intersection(retrieved_names))
                 retrieval_metrics[label]["hits"] += hits
@@ -139,6 +135,9 @@ def evaluate() -> dict[str, Any]:
                 sorted((validation_issue_counts + schema_issue_counts).items())
             ),
             "retrieval": retrieval_report,
+            "catalog_runtime_eligibility": registry.metadata.get(
+                "runtime_eligibility", {}
+            ),
             "runtime_acceptance": "not_run_without_browser_applet",
             "mathematical_correctness": "not_inferred_from_runtime_acceptance",
         },

@@ -1,4 +1,6 @@
+import asyncio
 from app.schemas.common import Difficulty, ProblemType
+from app.schemas.geometry_dsl import VisualizationEnvironment
 from types import SimpleNamespace
 
 from app.services.model_router import (
@@ -18,26 +20,154 @@ Chứng minh tứ giác (BAEF) nội tiếp một đường tròn.
 """.strip()
 
 
-def test_router_classifies_vietnamese_geometry_proof_as_hard() -> None:
+class RoutingLlamaClient:
+    enabled = True
+    available = True
+    model = "test-general-local-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.request: dict[str, object] = {}
+        self.settings = SimpleNamespace(
+            local_router_llama_model="test-tiny-router",
+            local_router_llama_max_tokens=256,
+            local_router_llama_timeout_seconds=3.0,
+        )
+
+    def is_model_available(self, model: str) -> bool:
+        return model == "test-tiny-router"
+
+    async def generate_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls += 1
+        self.request = kwargs
+        return {
+            "problem_type": "geometry",
+            "difficulty": "medium",
+            "visualization_environment": "geometry_2d",
+            "has_three_dimensional_structure": True,
+            "visualization_search_terms": ["Tetrahedron", "solid", "3D"],
+        }
+
+
+class NoVisualizationLlamaClient(RoutingLlamaClient):
+    async def generate_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls += 1
+        self.request = kwargs
+        return {
+            "problem_type": "arithmetic",
+            "difficulty": "easy",
+            "visualization_environment": "none",
+            "has_three_dimensional_structure": False,
+            "visualization_search_terms": [],
+        }
+
+
+class GeometryWithoutVisualizationLlamaClient(RoutingLlamaClient):
+    async def generate_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls += 1
+        self.request = kwargs
+        return {
+            "problem_type": "geometry",
+            "difficulty": "hard",
+            "visualization_environment": "none",
+            "has_three_dimensional_structure": False,
+            "visualization_search_terms": [],
+        }
+
+
+def test_sync_router_leaves_subject_unclassified_without_ai() -> None:
     routing = ModelRouter().route(VIETNAMESE_GEOMETRY_PROOF, has_image=False)
 
-    assert routing.problem_type is ProblemType.geometry
-    assert routing.difficulty is Difficulty.hard
-    assert routing.solver_model == HARD_MODEL
+    assert routing.problem_type is ProblemType.general
+    assert routing.difficulty is Difficulty.medium
+    assert routing.visualization_environment is None
+    assert routing.solver_model == EASY_MODEL
+    assert "left unclassified" in routing.reason
 
 
-def test_router_classifies_gcd_integer_problem_as_number_theory() -> None:
+def test_async_router_does_not_replace_failed_ai_with_keyword_detection() -> None:
     problem = (
         "Determine all pairs (a, b) of positive integers for which there exist "
         "positive integers g and N such that gcd(a^n+b, b^n+a) = g holds for "
         "all integers n ≥ N."
     )
+    llama_client = RoutingLlamaClient()
 
-    routing = ModelRouter().route(problem, has_image=False)
+    async def invalid_payload(**_: object) -> dict[str, object]:
+        return {"problem_type": "not-valid"}
 
-    assert routing.problem_type is ProblemType.number_theory
-    assert routing.difficulty is Difficulty.hard
-    assert routing.solver_model == HARD_MODEL
+    llama_client.generate_json = invalid_payload  # type: ignore[method-assign]
+
+    routing = asyncio.run(
+        ModelRouter(llama_client=llama_client).route_async(problem, has_image=False)
+    )
+
+    assert routing.problem_type is ProblemType.general
+    assert routing.difficulty is Difficulty.medium
+    assert routing.visualization_environment is None
+    assert "left unclassified" in routing.reason
+
+
+def test_tiny_router_resolves_conflicting_tetrahedron_dimension_as_3d() -> None:
+    llama_client = RoutingLlamaClient()
+    routing = asyncio.run(
+        ModelRouter(llama_client=llama_client).route_async(
+            "Visualize a tetrahedron!", has_image=False
+        )
+    )
+
+    assert llama_client.calls == 1
+    assert llama_client.request["model"] == "test-tiny-router"
+    assert llama_client.request["thinking_budget_tokens"] == 0
+    assert llama_client.request["json_schema"]["properties"][
+        "visualization_environment"
+    ]["enum"] == [
+        "geometry_2d",
+        "graphing",
+        "graphics_3d",
+        "cas",
+        "probability",
+        "statistics",
+        "spreadsheet",
+        "none",
+    ]
+    assert llama_client.request["json_schema"]["properties"][
+        "has_three_dimensional_structure"
+    ] == {"type": "boolean"}
+    assert routing.problem_type is ProblemType.geometry
+    assert routing.difficulty is Difficulty.medium
+    assert (
+        routing.visualization_environment
+        is VisualizationEnvironment.graphics_3d
+    )
+    assert routing.solver_model == EASY_MODEL
+    assert routing.visualization_search_terms == ("Tetrahedron", "solid", "3D")
+    assert "test-tiny-router supplied classification" in routing.reason
+
+
+def test_router_preserves_model_decision_that_no_visualization_is_useful() -> None:
+    routing = asyncio.run(
+        ModelRouter(llama_client=NoVisualizationLlamaClient()).route_async(
+            "What is 2 + 2?", has_image=False
+        )
+    )
+
+    assert routing.problem_type is ProblemType.arithmetic
+    assert routing.difficulty is Difficulty.easy
+    assert routing.visualization_environment is None
+    assert routing.visualization_search_terms == ()
+
+
+def test_router_reconciles_geometry_with_no_visualization() -> None:
+    routing = asyncio.run(
+        ModelRouter(
+            llama_client=GeometryWithoutVisualizationLlamaClient()
+        ).route_async(VIETNAMESE_GEOMETRY_PROOF, has_image=False)
+    )
+
+    assert routing.problem_type is ProblemType.geometry
+    assert routing.visualization_environment is VisualizationEnvironment.geometry_2d
+    assert "reconciled geometry classification" in routing.reason
 
 
 def test_structured_endpoints_use_only_the_gpt_oss_models() -> None:

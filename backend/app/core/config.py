@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         env_file=BACKEND_DIR / ".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    app_name: str = "IntoMath 2.0 API"
+    app_name: str = "IntoMath API"
     app_env: str = "development"
     app_debug: bool = True
     remote_model_attempt_timeout_seconds: float = Field(default=25.0, gt=0, le=120)
@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     local_llama_geometry_extraction_enabled: bool = True
     local_solver_llama_base_url: str = "http://localhost:8080"
     local_solver_llama_model: str = "unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL"
+    local_router_llama_model: str = "unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL"
+    local_router_llama_timeout_seconds: float = Field(default=30.0, gt=0, le=60)
+    local_router_llama_max_tokens: int = Field(default=300, ge=64, le=1_000)
     local_solver_llama_timeout_seconds: float = 20.0
     local_llama_startup_probe_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
     local_llama_unavailable_cooldown_seconds: float = Field(default=60.0, gt=0, le=600)

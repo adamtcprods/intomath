@@ -1,4 +1,4 @@
-# IntoMath 2.0 API
+# IntoMath API
 
 ## Base URL
 
@@ -86,6 +86,7 @@ Primary structured solving endpoint.
     "parser_model": "openai/gpt-oss-20b",
     "solver_model": "openai/gpt-oss-20b",
     "vision_model": null,
+    "visualization_environment": null,
     "reason": "classified as algebra; difficulty assessed as easy; kept on the lower-latency model"
   },
   "cached": false,
@@ -112,6 +113,10 @@ Primary structured solving endpoint.
 When NVIDIA NIM directly serves the structured solve, `routing.solver_model` is
 prefixed with `nvidia-direct:` followed by the exact NVIDIA-native model ID. This
 keeps the serving provider visible in the response.
+
+`routing.visualization_environment` is the local model's semantic selection and is
+one of `geometry_2d`, `graphing`, `graphics_3d`, `cas`, `probability`, `statistics`,
+`spreadsheet`, or `null` when the model selected no interactive view.
 
 ### `answer`
 - `text: string`
@@ -166,8 +171,8 @@ Each structured validation issue contains:
 
 DSL `1.1` is the only accepted visualization format. Every payload must declare
 `version`, `space`, `environment`, `actions`, and typed `render_hints`; explicit
-DSL `1.0` payloads are rejected. The existing high-level actions and
-`EXECUTE_COMMAND` are both represented in `1.1`:
+DSL `1.0` payloads are rejected. The existing high-level actions,
+`DEFINE_OBJECT`, and `EXECUTE_COMMAND` are represented in `1.1`:
 
 ```json
 {
@@ -201,6 +206,23 @@ may reorder actions by explicit references. Generic commands without `output`
 are allowed only as unreferenceable terminal results and produce an
 `untracked_output` warning.
 
+Definitions that are not command calls use `DEFINE_OBJECT`:
+
+```json
+{
+  "action": "DEFINE_OBJECT",
+  "output": "f",
+  "object_type": "function",
+  "value": {"kind": "equation", "value": "f(x) = x^2"}
+}
+```
+
+Generic `EXECUTE_COMMAND` actions are restricted to the 10–20 safe command
+names retrieved for that prompt. Both accepted and experimental safe overloads
+can be translated. Experimental use produces a validation warning and remains
+protected by browser rejection handling and rollback. Overloads marked
+`blocked` cannot be emitted or translated.
+
 ## OCR flow
 
 If `image_base64` is present:
@@ -211,9 +233,9 @@ If `image_base64` is present:
 ## Visualization flow
 
 If `include_visualization` is true:
-1. the problem statement is mechanically classified for actual geometric, functional, positional, or chart structure; `none` stops the visualization flow here
-2. a bounded relevant command set is retrieved from the local catalog
-3. the model emits typed DSL (or the deterministic fallback emits high-level actions)
+1. the tiny router model selects the visualization environment; `none` stops the visualization flow here
+2. the tiny model expands the request into semantic GeoGebra search terms and a bounded set of at most 10 relevant commands is retrieved from the local catalog
+3. a model emits typed DSL; if every model-backed parser fails, no visualization is emitted
 4. schema, command selection, signature/type/environment and dependency validation run
 5. a remote plan with action-scoped validation errors gets at most one compact repair turn, followed by full re-validation
 6. trusted code translates the sorted DSL into GeoGebra commands
@@ -223,8 +245,7 @@ Remote solve and geometry requests supply strict JSON schemas in their prompts a
 validate each response locally. A provider failure is logged and
 warned separately from a model plan that parsed but failed deterministic validation.
 Geometry then tries the validated local llama.cpp parser, NVIDIA direct gpt-oss-120b
-and gpt-oss-20b in that order, then a limited deterministic
-construction. Every proposed DSL—including NVIDIA direct output—runs through the same
+and gpt-oss-20b in that order. Every proposed DSL—including NVIDIA direct output—runs through the same
 authoritative validators. Invalid output follows this chain too; it does not stop at an
 invalid but parseable DSL.
 

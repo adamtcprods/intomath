@@ -1,12 +1,11 @@
 # Python
-backend/.venv/
+.venv/
+.venv-local/
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
 backend/*.db
 backend/*.sqlite3
-.venv
-.venv-local
 
 # Frontend / Bun
 frontend/node_modules/
@@ -14,6 +13,7 @@ frontend/.next/
 frontend/package-lock.json
 frontend/yarn.lock
 frontend/pnpm-lock.yaml
+*.tsbuildinfo
 
 # Env
 backend/.env

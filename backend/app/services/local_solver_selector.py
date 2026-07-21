@@ -20,14 +20,13 @@ LOCAL_SOLVER_DETECTION_PROMPT = """
 You are a strict routing classifier for IntoMath's deterministic local math solver.
 Return exactly one JSON object and nothing else.
 
-The local solver can ONLY solve these prompt shapes:
+The local solver can ONLY execute these prompt shapes after you select it:
 1. Arithmetic expressions written with digits and operators, e.g. "12*(3+4)-5".
 2. One-variable linear equations or inequalities in x with numeric coefficients, parentheses, multiplication, or division, e.g. "2(x + 3) = 14" or "x/2 + 3 < 7".
 3. Quadratic graph analysis for y=... or f(x)=..., e.g. "y = x^2 - 4x + 3".
-4. Simple constructions: perpendicular bisector of AB, circle with center O and radius r, or construct/draw triangle ABC.
 
 If the problem can be normalized into one of those exact shapes, set use_local_solver=true and put that canonical text in normalized_prompt.
-If it needs proof, calculus, trigonometry, statistics, word-problem reasoning, systems, factoring beyond graph analysis, geometry theorem reasoning, or you are unsure, set use_local_solver=false.
+Always set use_local_solver=false for geometry or construction requests. Also reject proof, calculus, trigonometry, statistics, word-problem reasoning, systems, factoring beyond graph analysis, or anything uncertain.
 Do not solve the problem. Do not include the answer.
 
 JSON schema:
@@ -38,13 +37,13 @@ logger = logging.getLogger(__name__)
 
 
 class LocalSolverSelector:
-    """Selects deterministic solving when it can be trusted.
+    """Lets the local model select a narrowly scoped deterministic execution tool.
 
-    The deterministic fallback solver is always the final gate. llama.cpp may suggest
-    that a prompt can be normalized into a supported shape, but we only use that
-    route if the deterministic solver then returns a high-confidence result.
+    llama.cpp must explicitly select and normalize a supported prompt before the
+    deterministic solver runs. The deterministic solver remains the final correctness
+    gate and geometry is never eligible for this pre-model fast path.
 
-    If both deterministic solving and llama.cpp normalization fail, and the question
+    If local tool selection/normalization fails, and the question
     looks like math trivia or a concept question, the llama.cpp trivia solver is
     attempted as a zero-cost local alternative before falling through to the cloud.
     """
@@ -69,19 +68,11 @@ class LocalSolverSelector:
     ) -> LocalSolveResult | None:
         if not self.settings.local_solver_first:
             return None
+        if problem_type is ProblemType.geometry:
+            return None
 
-        # 1. Try the fast, fully deterministic solver first.
-        direct_result = self._solve_with_deterministic_solver(
-            text=text,
-            problem_type=problem_type,
-            difficulty=difficulty,
-            reason="matched a deterministic local solver pattern",
-        )
-        if direct_result is not None:
-            return direct_result
-
-        # 2. Ask Llama-server to normalise the prompt into a canonical supported form,
-        #    then re-run the deterministic solver on the normalised text.
+        # Ask Llama-server to select the tool and normalize the prompt. Pattern
+        # matching is only a correctness gate after that model decision.
         if self._should_use_llama_detector(text):
             detection = await self._detect_with_llama(text)
             if detection is not None and detection.use_local_solver:
@@ -98,7 +89,7 @@ class LocalSolverSelector:
                     if normalised_result is not None:
                         return normalised_result
 
-        # 3. Fall back to the llama.cpp trivia solver for concept / trivia questions.
+        # Fall back to the llama.cpp trivia solver for concept / trivia questions.
         if getattr(self.settings, "local_solver_llama_trivia_enabled", False):
             trivia_result = await self.trivia_solver.solve(
                 text, problem_type, difficulty
@@ -121,6 +112,9 @@ class LocalSolverSelector:
         reason: str,
         detector_model: str | None = None,
     ) -> LocalSolveResult | None:
+        supported_problem_type = self.fallback_solver.detect_problem_type(text)
+        if supported_problem_type in {None, ProblemType.geometry}:
+            return None
         answer, steps, confidence, warnings = self.fallback_solver.solve(
             text, problem_type, difficulty
         )
@@ -133,7 +127,7 @@ class LocalSolverSelector:
             confidence=confidence,
             warnings=warnings,
             normalized_text=text,
-            problem_type=self._infer_supported_problem_type(text),
+            problem_type=supported_problem_type,
             reason=reason,
             detector_model=detector_model,
         )
@@ -177,8 +171,6 @@ class LocalSolverSelector:
             reason=self._coerce_optional_string(payload.get("reason")),
         )
 
-    def _infer_supported_problem_type(self, text: str) -> ProblemType | None:
-        return self.fallback_solver.detect_problem_type(text)
 
     def _coerce_bool(self, value: Any) -> bool:
         if isinstance(value, bool):

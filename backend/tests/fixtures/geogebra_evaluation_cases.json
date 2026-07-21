@@ -1,5 +1,23 @@
 [
   {
+    "id": "core_line",
+    "family": "core_geometry",
+    "status": "supported",
+    "prompt": "Draw the line through points A and B.",
+    "allowed_commands": ["Line"],
+    "dsl": {
+      "version": "1.1",
+      "space": "euclidean_2d",
+      "environment": "geometry_2d",
+      "actions": [
+        {"action": "CREATE_POINT", "label": "A", "coordinates": [0, 0]},
+        {"action": "CREATE_POINT", "label": "B", "coordinates": [3, 1]},
+        {"action": "EXECUTE_COMMAND", "output": "lAB", "command": "Line", "arguments": [{"kind": "reference", "value": "A"}, {"kind": "reference", "value": "B"}]}
+      ],
+      "render_hints": {}
+    }
+  },
+  {
     "id": "core_circle_tangent",
     "family": "core_geometry",
     "status": "supported",

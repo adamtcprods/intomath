@@ -14,7 +14,7 @@ import tempfile
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 DEFAULT_REPOSITORY = "https://github.com/geogebra/manual"
@@ -22,20 +22,24 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "geogebra_commands.json"
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
-GENERATOR_VERSION = "1.0.0"
-CATALOG_SCHEMA_VERSION = "1.0"
+from app.services.geogebra_support_policy import load_runtime_acceptance  # noqa: E402
+from app.services.geogebra_command_registry import evaluate_overload_support  # noqa: E402
+
+
+GENERATOR_VERSION = "1.4.0"
+CATALOG_SCHEMA_VERSION = "1.4"
 _SIGNATURE_LINE = re.compile(
     r"^([A-Za-z][A-Za-z0-9]*)\s*\(([^\n]*)\)\s*::\s*$", re.MULTILINE
 )
-_CATEGORY_XREF = re.compile(r"xref:/commands/([A-Za-z0-9_]+)\.adoc")
+_CATEGORY_XREF = re.compile(r"xref:/?commands/([A-Za-z0-9_]+)\.adoc")
 _EXAMPLE = re.compile(r"`\+\+(.+?)\+\+`", re.DOTALL)
 
 _CATEGORY_NAMES = {
     "3D": "3d",
     "Algebra": "algebra",
-    "CAS_Restricted": "cas",
-    "CAS_Specific": "cas",
-    "CAS_View_Supported_Geometry": "cas",
+    "CAS_Restricted": "cas_restricted",
+    "CAS_Specific": "cas_specific",
+    "CAS_View_Supported_Geometry": "cas_supported_geometry",
     "Chart": "chart",
     "Conic": "conic",
     "Discrete_Math": "discrete_math",
@@ -44,16 +48,132 @@ _CATEGORY_NAMES = {
     "Geometry": "geometry",
     "GeoGebra": "geogebra_general",
     "List": "list",
+    "Logic": "logic",
     "Logical": "logic",
     "Optimization": "optimization",
     "Probability": "probability",
-    "Scripting": "other",
+    "Scripting": "scripting",
     "Spreadsheet": "spreadsheet",
     "Statistics": "statistics",
     "Text": "text",
     "Transformation": "transformation",
     "Vector_and_Matrix": "vector_and_matrix",
 }
+
+# Upstream categories describe where a command appears in the GeoGebra manual.
+# Product families are a smaller, stable taxonomy used to plan validation and
+# runtime rollout. A command can belong to more than one family because the
+# upstream category pages overlap (for example, Circle is both 2D and 3D).
+COMMAND_FAMILY_ORDER = (
+    "geometry_2d",
+    "transformations",
+    "graphing_calculus",
+    "graphics_3d",
+    "cas",
+    "statistics",
+    "probability",
+    "spreadsheet",
+    "lists",
+    "vector_matrix",
+    "discrete_math",
+    "financial",
+    "logic",
+    "optimization",
+    "text",
+    "scripting",
+    "general",
+    "other",
+)
+_COMMAND_FAMILY_INDEX = {
+    family: index for index, family in enumerate(COMMAND_FAMILY_ORDER)
+}
+_CATEGORY_TO_FAMILY = {
+    "3d": "graphics_3d",
+    "algebra": "graphing_calculus",
+    "cas": "cas",
+    "cas_restricted": "cas",
+    "cas_specific": "cas",
+    "cas_supported_geometry": "cas",
+    "chart": "statistics",
+    "conic": "geometry_2d",
+    "discrete_math": "discrete_math",
+    "financial": "financial",
+    "functions_and_calculus": "graphing_calculus",
+    "geogebra_general": "general",
+    "geometry": "geometry_2d",
+    "list": "lists",
+    "logic": "logic",
+    "optimization": "optimization",
+    "other": "other",
+    "probability": "probability",
+    "scripting": "scripting",
+    "spreadsheet": "spreadsheet",
+    "statistics": "statistics",
+    "text": "text",
+    "transformation": "transformations",
+    "vector_and_matrix": "vector_matrix",
+}
+
+
+def command_families_for_categories(categories: Iterable[str]) -> list[str]:
+    """Map overlapping manual categories to stable product command families."""
+
+    families = {
+        _CATEGORY_TO_FAMILY.get(category, "other") for category in categories
+    }
+    return sorted(
+        families or {"other"},
+        key=lambda family: _COMMAND_FAMILY_INDEX[family],
+    )
+
+
+def _family_counts(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    command_names: dict[str, set[str]] = defaultdict(set)
+    overloads: dict[str, int] = defaultdict(int)
+    for entry in entries:
+        for family in entry["families"]:
+            command_names[family].add(entry["command_name"])
+            overloads[family] += 1
+    return {
+        family: {
+            "command_names": len(command_names[family]),
+            "overloads": overloads[family],
+        }
+        for family in COMMAND_FAMILY_ORDER
+        if family in command_names
+    }
+
+
+def _support_status_counts(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    command_names: dict[str, set[str]] = defaultdict(set)
+    overloads: dict[str, int] = defaultdict(int)
+    for entry in entries:
+        status = entry["support_status"]
+        command_names[status].add(entry["command_name"])
+        overloads[status] += 1
+    return {
+        status: {
+            "command_names": len(command_names[status]),
+            "overloads": overloads[status],
+        }
+        for status in ("supported", "experimental", "blocked")
+        if status in command_names
+    }
+
+
+def _runtime_eligibility_counts(
+    entries: list[dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    for label, eligible in (("eligible", True), ("blocked", False)):
+        selected = [
+            entry for entry in entries if entry["runtime_eligible"] is eligible
+        ]
+        result[label] = {
+            "command_names": len({entry["command_name"] for entry in selected}),
+            "overloads": len(selected),
+        }
+    return result
 
 
 def _run(*args: str, cwd: Path | None = None) -> str:
@@ -152,6 +272,23 @@ def _examples_for(text: str, command_name: str) -> list[str]:
     return examples
 
 
+def _search_text_for(entry: dict[str, Any]) -> str:
+    categories = entry["all_categories"]
+    examples = entry["examples"]
+    syntax = entry["syntax"]
+    description = entry["description"]
+    return " | ".join(
+        part
+        for part in (
+            entry["command_name"],
+            f"[{', '.join(categories)}]",
+            f"{syntax}: {description}" if description else syntax,
+            f"Examples: {'; '.join(examples)}" if examples else "",
+        )
+        if part
+    )
+
+
 def parse_manual(
     manual_path: Path,
     *,
@@ -160,6 +297,7 @@ def parse_manual(
 ) -> tuple[list[dict[str, Any]], int]:
     commands_dir = _commands_directory(manual_path)
     categories_by_page = _category_map(commands_dir)
+    runtime_acceptance = load_runtime_acceptance()
     entries: list[dict[str, Any]] = []
     parsed_pages = 0
 
@@ -170,40 +308,63 @@ def parse_manual(
             continue
         parsed_pages += 1
         categories = sorted(categories_by_page.get(page.stem, {"other"}))
+        families = command_families_for_categories(categories)
         for signature in signatures:
             command_name = signature.group(1)
             syntax = f"{command_name}({signature.group(2)})"
             description = _description_after(text, signature.end())
             category = categories[0]
             examples = _examples_for(text, command_name)
-            entries.append(
-                {
-                    "command_name": command_name,
-                    "syntax": syntax,
-                    "description": description,
-                    "examples": examples,
-                    "is_cas": "cas" in categories,
-                    "notes": [],
-                    "category": category,
-                    "all_categories": categories,
-                    "search_text": " | ".join(
-                        part
-                        for part in (
-                            command_name,
-                            f"[{', '.join(categories)}]",
-                            f"{syntax}: {description}" if description else syntax,
-                            f"Examples: {'; '.join(examples)}" if examples else "",
-                        )
-                        if part
-                    ),
-                    "source": {
-                        "repository": repository,
-                        "path": f"en/modules/ROOT/pages/commands/{page.name}",
-                        "commit": commit,
-                    },
-                    "web_compatibility": "unknown",
-                }
+            acceptance = runtime_acceptance.get(
+                (command_name.casefold(), syntax)
             )
+            runtime_environments = sorted(
+                acceptance.environments if acceptance is not None else ()
+            )
+            support = evaluate_overload_support(
+                command_name=command_name,
+                syntax=syntax,
+                categories=categories,
+                families=families,
+                is_cas=any(category.startswith("cas") for category in categories),
+                runtime_environment_values=runtime_environments,
+                runtime_output_type_value=(
+                    acceptance.output_type if acceptance is not None else None
+                ),
+                runtime_output_type_strategy=(
+                    acceptance.output_type_strategy
+                    if acceptance is not None
+                    else None
+                ),
+            )
+            entry = {
+                "command_name": command_name,
+                "syntax": syntax,
+                "description": description,
+                "examples": examples,
+                "is_cas": any(category.startswith("cas") for category in categories),
+                "notes": [],
+                "category": category,
+                "all_categories": categories,
+                "families": families,
+                "support_status": support.status.value,
+                "support_requirements": list(support.requirements),
+                "runtime_eligible": support.runtime_eligible,
+                "runtime_accepted_environments": runtime_environments,
+                "capabilities": sorted(
+                    capability.value for capability in support.capabilities
+                ),
+                "output_type": support.output_type.value,
+                "output_type_strategy": support.output_type_strategy,
+                "source": {
+                    "repository": repository,
+                    "path": f"en/modules/ROOT/pages/commands/{page.name}",
+                    "commit": commit,
+                },
+                "web_compatibility": "unknown",
+            }
+            entry["search_text"] = _search_text_for(entry)
+            entries.append(entry)
 
     entries.sort(
         key=lambda entry: (
@@ -231,6 +392,9 @@ def _catalog_bytes(
             "command_pages_parsed": parsed_pages,
             "command_names": len({entry["command_name"] for entry in entries}),
             "overloads": len(entries),
+            "families": _family_counts(entries),
+            "support_statuses": _support_status_counts(entries),
+            "runtime_eligibility": _runtime_eligibility_counts(entries),
         },
         "commands": entries,
     }
@@ -281,6 +445,9 @@ def generate_catalog(
         "command_pages_parsed": parsed_pages,
         "command_names": len({entry["command_name"] for entry in entries}),
         "overloads": len(entries),
+        "families": _family_counts(entries),
+        "support_statuses": _support_status_counts(entries),
+        "runtime_eligibility": _runtime_eligibility_counts(entries),
     }
     metadata_path = output.with_suffix(output.suffix + ".metadata.json")
     metadata_path.write_text(

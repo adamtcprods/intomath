@@ -26,6 +26,8 @@ export interface GeometryAction {
   action: string;
   label?: string | null;
   output?: string | null;
+  object_type?: GeoGebraDefinitionObjectType | null;
+  value?: GeoGebraDefinitionValue | null;
   command?: string | null;
   arguments?: GeoGebraArgument[];
   points?: string[];
@@ -46,6 +48,18 @@ export type VisualizationEnvironment =
   | "statistics"
   | "spreadsheet";
 
+export type GeoGebraDefinitionObjectType =
+  | "function"
+  | "equation"
+  | "expression"
+  | "number"
+  | "point"
+  | "vector"
+  | "list"
+  | "text"
+  | "boolean"
+  | "interval";
+
 export type GeoGebraArgument =
   | { kind: "reference"; value: string }
   | { kind: "number"; value: number }
@@ -64,6 +78,11 @@ export type GeoGebraArgument =
       lower_inclusive: boolean;
       upper_inclusive: boolean;
     };
+
+export type GeoGebraDefinitionValue = Exclude<
+  GeoGebraArgument,
+  { kind: "reference" } | { kind: "angle" }
+>;
 
 export interface GeoGebraObjectStyle {
   label: string;
@@ -137,6 +156,7 @@ export interface RoutingDecision {
   parser_model: string;
   solver_model: string;
   vision_model?: string | null;
+  visualization_environment?: VisualizationEnvironment | null;
   reason: string;
 }
 

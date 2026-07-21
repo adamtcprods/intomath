@@ -6,6 +6,8 @@ from typing import Iterable
 from app.schemas.geometry_dsl import (
     AngleArgument,
     BooleanArgument,
+    DefinitionEquationArgument,
+    DefinitionObjectType,
     EquationArgument,
     ExpressionArgument,
     GeoGebraArgument,
@@ -141,6 +143,8 @@ class GeoGebraTranslator:
     ) -> str:
         if action.action is GeometryActionType.EXECUTE_COMMAND:
             return self._emit_generic_command(action)
+        if action.action is GeometryActionType.DEFINE_OBJECT:
+            return self._emit_definition(action)
 
         label = action.label or ""
         if action.action is GeometryActionType.CREATE_POINT:
@@ -190,6 +194,15 @@ class GeoGebraTranslator:
             return f"{label}(x) = {action.equation or 'x'}"
 
         raise ValueError(f"Unsupported validated action: {action.action.value}")
+
+    def _emit_definition(self, action: GeometryAction) -> str:
+        if action.output is None or action.object_type is None or action.value is None:
+            raise ValueError("Invalid DEFINE_OBJECT reached translation.")
+        if isinstance(action.value, DefinitionEquationArgument):
+            if action.object_type is DefinitionObjectType.function:
+                return action.value.value
+            return f"{action.output}: {action.value.value}"
+        return f"{action.output} = {self.serialize_argument(action.value)}"
 
     def _emit_generic_command(self, action: GeometryAction) -> str:
         definition = self.registry.lookup(action.command or "")

@@ -1,4 +1,4 @@
-# IntoMath 2.0 Setup
+# IntoMath Setup
 
 ## Prerequisites
 
@@ -74,7 +74,7 @@ http://localhost:8000
 Create `backend/.env` with values like:
 
 ```env
-APP_NAME=IntoMath 2.0 API
+APP_NAME=IntoMath API
 APP_ENV=development
 APP_DEBUG=true
 REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0
@@ -110,7 +110,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
 
 IntoMath expects the following model policy:
 
-- supported deterministic solving first: `local:deterministic-solver`
+- AI-selected deterministic arithmetic/algebra execution: `local:deterministic-solver`
 - easy solving via NVIDIA NIM: `openai/gpt-oss-20b`
 - hard solving via NVIDIA NIM: `openai/gpt-oss-120b`
 - NVIDIA NIM fallback order: gpt-oss-120b, gpt-oss-20b
@@ -128,8 +128,7 @@ For local-first routing, normalization, trivia fallback, and visualization DSL e
   --threads 6 \
   --threads-batch 12 \
   --parallel 1 \
-  --reasoning on \
-  --reasoning-budget 64
+  --reasoning auto
 ```
 
 `LOCAL_LLAMA_ENABLED=true` does not start this process. Confirm the operational
@@ -152,19 +151,29 @@ bounded response body. A failed probe opens a process-wide 60-second circuit key
 URL and model, so classification, trivia, and geometry do not repeat the same dead hop.
 Start the server before the API, restart the API after starting it, or wait for the
 cooldown to expire; a successful request closes the circuit. Geometry continues through
-the validated NVIDIA direct and deterministic fallbacks while the circuit is open.
+the validated NVIDIA direct model fallbacks while the circuit is open.
 
-The model proposes routing decisions and visualization DSL, but deterministic code remains the authority: the solver rejects unsupported normalization hints, and the geometry extractor uses constrained JSON decoding plus validation of labels, dependencies, requested intent, numeric values, expressions, and action count before producing GeoGebra commands. Invented point coordinates are removed unless they are explicit in the prompt, and conservative normalization repairs unambiguous triangle/circle labeling. If local extraction is unavailable, semantically mismatched, or invalid, a small deterministic parser handles only basic constructions.
+The model proposes problem type, difficulty, visualization environment, and DSL;
+there are no object-name branches that decide 2D versus 3D. Deterministic code
+remains the trust boundary: it rejects unsupported normalization hints and validates
+labels, dependencies, retrieved command membership, overload argument types,
+environment compatibility, numeric values, expressions, and action count before
+producing GeoGebra commands. Explicit visualization requests may use neutral finite
+placement/scale defaults solely to make an under-specified object visible. If every
+model-backed extractor is unavailable or invalid, no visualization is generated.
 
-`LFM2.5-8B-A1B` is reasoning-tuned. Keep `--reasoning-budget 64` so it reaches the final structured response promptly; unrestricted reasoning exhausted a 1,200-token response budget in live testing. On an Intel i5-12400 CPU, the tested `UD-Q4_K_XL` quantization produced approximately 22–24 output tokens/second, with simple geometry extraction taking about 14–18 seconds. The model uses several GiB of RAM, so at least 8–10 GiB of available memory is recommended.
+`LFM2.5-8B-A1B` is reasoning-tuned. Leave the server reasoning budget unrestricted
+so IntoMath can set `thinking_budget_tokens` per request; routing and bounded DSL
+extraction use zero hidden-reasoning tokens with strict output schemas. The model
+uses several GiB of RAM, so at least 8–10 GiB of available memory is recommended.
 
 The current code routes solver requests in `backend/app/services/solver_service.py`, `backend/app/services/local_solver_selector.py`, and `backend/app/services/model_router.py`, and uses local DeepSeek OCR for image extraction in `backend/app/services/ocr_service.py`.
 
 NVIDIA NIM request contracts omit `response_format`, so structured solve and geometry
 requests supply their schemas in the prompt and validate every response locally.
-Geometry goes directly to the local llama.cpp parser, then the ordered NVIDIA list,
-then the limited deterministic parser. Invalid model output has different warnings and
-follows the same fallback chain.
+Geometry goes directly to the local llama.cpp parser, then the ordered NVIDIA list.
+Invalid model output has different warnings and follows the same model-backed fallback
+chain; no regex construction parser replaces it.
 
 Structured solve candidates are explicit and ordered:
 
@@ -244,27 +253,41 @@ PYTHONPATH=backend .venv-local/bin/python \
 
 The script accepts `--manual-path`, `--repository`, `--ref`, `--commit`, and
 `--output`. It parses every page containing one or more formal command
-signatures, derives categories from upstream category pages, attaches source
-path/repository/commit to every overload, validates a temporary registry, and
-atomically replaces the catalog only after validation. Catalog JSON is stably
-sorted and deterministic for a given commit. The sidecar
+signatures, preserves categories from upstream category pages, and maps those
+overlapping documentation categories into stable product-facing `families`.
+Each overload can belong to multiple families; for example, a command listed by
+both Geometry and 3D receives `geometry_2d` and `graphics_3d`. The generator
+also records command-name and overload counts per family in catalog metadata.
+It attaches source path/repository/commit to every overload, validates a
+temporary registry, and atomically replaces the catalog only after validation.
+Catalog JSON is stably sorted and deterministic for a given commit. The sidecar
 `backend/geogebra_commands.json.metadata.json` records the generation timestamp,
 content SHA-256, generator/schema versions, source commit, pages, names, and
-overload counts. Fixture tests do not require network access.
+overload, family, acceptance-status, and runtime-eligibility counts. Catalog
+schema `1.4` adds generated environment capabilities and acceptance-backed output
+metadata alongside the exact
+`support_status`, `support_requirements`, and
+`runtime_accepted_environments` plus `runtime_eligible` to every overload.
+Fixture tests do not require network access.
 
-Adding a command to the catalog does not enable it. To roll out a family:
+Safe catalog commands are runtime-eligible automatically; catalog membership
+never overrides the permanent denylist. Exact overload acceptance records live
+in `backend/geogebra_runtime_acceptance.json`. The registry derives acceptance
+status independently and refuses stale catalog metadata. To promote an
+experimental overload to accepted:
 
-1. add/verify capability and approximate type mappings;
-2. add fixture coverage for overload counts and types;
-3. add retrieval examples that exclude irrelevant commands;
-4. add serializer and invalid-input cases;
-5. record browser applet runtime checks; and
-6. add reviewed names to `ROLLED_OUT_GENERIC_COMMANDS`.
+1. verify that the manual signature normalizes without uncertainty;
+2. map every argument to a representable typed DSL value;
+3. add the known output type and correct environment metadata;
+4. add serializer, invalid-input, dependency, and bounded-retrieval fixtures;
+5. run the exact translated fixture against the browser applet; and
+6. record the accepted signature, environment, output type/strategy, and fixture ID in the runtime
+   acceptance manifest, then regenerate the catalog.
 
-The next recommended family is function graphing and calculus. Lists/statistics,
-loci/advanced geometry, 3D, and CAS follow. Spreadsheet commands stay disabled
-until a spreadsheet-specific UI is reviewed. Scripting requires a separate
-future security design.
+The planned order is transformations and measurements; advanced graphing and
+calculus; statistics and probability; 3D solids and surfaces; CAS; then
+spreadsheet. Scripting, network/file behavior, and unsafe state mutation remain
+permanently blocked rather than entering this rollout.
 
 ## GeoGebra browser validation
 
@@ -275,6 +298,11 @@ requires browser network access to GeoGebra's deployment script. Runtime
 acceptance is the final syntax check, but it is not evidence that a construction
 is mathematically correct.
 
+The checked-in acceptance manifest is consumed as prior browser evidence. The
+offline fixture evaluator verifies that every record still points to a reviewed
+DSL fixture and exact catalog overload; it deliberately reports that it did not
+re-run the live browser applet during an offline test run.
+
 Raw AI-generated command mode is not available. If a trusted-user diagnostic
 mode is ever added, it must be disabled by default, count/length limited,
 single-command only, catalog and environment checked, scripting/JavaScript
@@ -283,7 +311,7 @@ denied, and executed one command at a time with boolean result inspection.
 ## Notes about local development
 
 - The frontend uses Bun as its package manager. Keep `frontend/bun.lock` committed and do not regenerate `package-lock.json`.
-- The backend tries deterministic local solving for supported typed prompts before model-backed solving.
+- The backend runs deterministic arithmetic/algebra only after the tiny model selects and normalizes that execution path.
 - GeoGebra is loaded lazily in the browser from the GeoGebra deployment script.
 - The registry validates selected names, signatures, approximate types,
   environment, rollout status, and dependencies against

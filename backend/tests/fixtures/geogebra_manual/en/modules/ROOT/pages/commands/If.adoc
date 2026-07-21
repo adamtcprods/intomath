@@ -1,0 +1,4 @@
+= If Command
+
+If( <Condition>, <Then> )::
+  Returns the second argument when the condition is true.

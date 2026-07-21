@@ -1,4 +1,4 @@
-# IntoMath 2.0
+# IntoMath
 
 Math help that actually solves.
 
@@ -15,7 +15,10 @@ Students can type a prompt and receive:
 - hints and common mistakes
 - an interactive GeoGebra visualization when the backend can generate one
 
-Image upload uses local OCR. For supported typed prompts, the backend tries the local deterministic solver first. It handles arithmetic, one-variable linear equations with basic parentheses/division, quadratic graphs, and simple geometry constructions. A local llama.cpp model can normalize borderline prompts and extract validated visualization DSL, while proof-style geometry can use NVIDIA NIM routing.
+Image upload uses local OCR. A local llama.cpp model selects problem type,
+difficulty, visualization environment, semantic catalog terms, and any narrow
+deterministic arithmetic/algebra execution path. It also extracts validated
+visualization DSL, while proof-style geometry can use NVIDIA NIM routing.
 
 ## Tech stack
 
@@ -90,26 +93,32 @@ This prevents the UI from depending on unpredictable free-form model output.
 The routing layer lives in `backend/app/services/model_router.py`.
 
 Current models and local routes:
-- **Deterministic local solving first:** `local:deterministic-solver`
+- **AI-selected deterministic execution:** `local:deterministic-solver`
 - **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` through llama-server with JSON-schema constraints
-- **Local routing and solver normalization:** the same llama.cpp model
+- **Local semantic routing:** the same llama.cpp model selects problem type,
+  difficulty, and the visualization environment (`none`, 2D, graphing, 3D,
+  CAS, probability, statistics, or spreadsheet) in one constrained response
 - **Easy / lower-latency solving via NVIDIA NIM:** `openai/gpt-oss-20b`
 - **Hard / proof-heavy solving via NVIDIA NIM:** `openai/gpt-oss-120b`
 - **Explicit JSON fallback routing:** NVIDIA-hosted gpt-oss models with no opaque router alias
 - **OCR / visual extraction locally:** `deepseek-ai/deepseek-ocr-2`
 
 Examples:
-- supported arithmetic → `local:deterministic-solver`
-- supported linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
-- supported quadratic graphs → `local:deterministic-solver`
+- AI-selected arithmetic → `local:deterministic-solver`
+- AI-selected linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
+- AI-selected quadratic graph analysis → `local:deterministic-solver`
 - geometry proofs → `openai/gpt-oss-120b`
 - proof-style calculus → `openai/gpt-oss-120b`
-- image input → OCR first, then local deterministic solving when supported, otherwise normal model routing
+- image input → OCR first, then normal model routing and optional AI-selected local execution
 
 ### 3. Catalog-driven GeoGebra DSL
 The model is not allowed to emit arbitrary GeoGebra syntax. DSL `1.1` is the
 only accepted visualization format and includes both the existing high-level
 actions and the typed generic `EXECUTE_COMMAND` action.
+
+Visualization environments are selected by the local model, not by object-name
+or command-name branches. The selected environment bounds catalog retrieval;
+the DSL model then chooses among only the relevant retrieved commands.
 
 Instead, visualization intent is represented as structured actions such as:
 - `CREATE_POINT`
@@ -122,21 +131,30 @@ Instead, visualization intent is represented as structured actions such as:
 - `PARALLEL`
 - `ANGLE_BISECTOR`
 - `CREATE_FUNCTION`
+- `DEFINE_OBJECT`
 - `EXECUTE_COMMAND`
 
 Generic command arguments use discriminated kinds: `reference`, `number`,
 `angle`, `point`, `vector`, `text`, `boolean`, `expression`, `equation`, `list`,
-and `interval`. IntoMath classifies the visualization environment, retrieves a
-small relevant command set from the local registry, validates signatures,
+and `interval`. IntoMath classifies the visualization environment, asks the tiny
+model for semantic GeoGebra search terms, retrieves at most 10 relevant commands
+from the local registry, validates signatures,
 types and dependencies, and only then translates it. The full catalog is never
 placed in a model prompt.
 
-The production rollout currently covers the existing high-level actions plus
-the core 2D generic set (points/lines/circles/conics, intersections,
-transformations, tangents, and common measurements). Catalog presence alone is
-not a support claim. Graphing retains the deterministic `CREATE_FUNCTION` path;
-advanced geometry, calculus, statistics/probability, 3D, CAS, and spreadsheet
-families remain gated pending family-specific signature and web-runtime tests.
+`DEFINE_OBJECT` handles safe definitions that are not command calls, including
+`f(x) = x^2`; it is the preferred path for new function definitions while
+`CREATE_FUNCTION` remains compatible with persisted DSL 1.1 payloads.
+
+Catalog presence alone is not an acceptance claim. Every exact overload is
+marked `supported`, `experimental`, or `blocked`, and separately records
+whether it is runtime-eligible. All 933 overloads across the 434 non-dangerous
+command names can participate in bounded retrieval and typed translation in
+their applicable environments. Experimental overloads emit a warning and rely
+on GeoGebra's boolean runtime result plus construction rollback. The remaining
+119 overloads across 68 scripting/state/network/media command names are
+permanently blocked. Four exact overloads currently carry prior browser
+acceptance evidence; that label no longer limits catalog utilization.
 
 ### 4. Deterministic translation
 `backend/app/services/geogebra_translator.py` converts DSL actions into GeoGebra commands in code.
@@ -224,9 +242,9 @@ Backend default URL: `http://localhost:8000`
 - `NVIDIA_BASE_URL` — defaults to `https://integrate.api.nvidia.com/v1`
 - `DATABASE_URL`
 - `CORS_ORIGINS`
-- `LOCAL_SOLVER_FIRST` — defaults to `true`; tries deterministic solving before model-backed solving
+- `LOCAL_SOLVER_FIRST` — defaults to `true`; allows AI-selected deterministic execution before model-backed solving
 - `LOCAL_LLAMA_ENABLED` — defaults to `true`; master switch for the local llama.cpp integration
-- `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; asks local llama-server to detect/normalize supported local-solver prompts when direct deterministic matching fails
+- `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; requires local llama-server to select and normalize supported deterministic-execution prompts
 - `LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED` — defaults to `true`; enables the local concept/trivia fallback
 - `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; uses the local model to produce validated visualization DSL for local solve routes
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`

@@ -189,6 +189,7 @@ class RoutingPayload(BaseModel):
     parser_model: str
     solver_model: str
     vision_model: str | None = None
+    visualization_environment: VisualizationEnvironment | None = None
     reason: str
 
 

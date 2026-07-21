@@ -1,7 +1,6 @@
 [project]
 name = "intomath-backend"
-version = "2.0.0"
-description = "IntoMath 2.0 backend"
+description = "IntoMath backend"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.14",
@@ -11,7 +10,7 @@ dependencies = [
   "sqlalchemy>=2.0.41",
   "psycopg[binary]>=3.2.9",
   "httpx>=0.28.1",
-  "python-multipart>=0.0.20",
+
   "pillow>=11.0.0",
   "torch>=2.5.0",
   "transformers>=4.47.0",

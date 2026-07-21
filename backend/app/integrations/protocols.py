@@ -2,26 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
-class _StructuredCompletionProtocolMeta(type(Protocol)):
-    """Allow class checks for this data protocol as well as instance checks."""
-
-    def __subclasscheck__(cls, subclass: type[Any]) -> bool:
-        if getattr(cls, "_is_runtime_protocol", False):
-            missing = object()
-            enabled = inspect.getattr_static(subclass, "enabled", missing)
-            complete_json = inspect.getattr_static(subclass, "complete_json", None)
-            return enabled is not missing and callable(complete_json)
-        return super().__subclasscheck__(subclass)
-
-
-@runtime_checkable
-class StructuredCompletionClient(
-    Protocol, metaclass=_StructuredCompletionProtocolMeta
-):
+class StructuredCompletionClient(Protocol):
     """Protocol for any LLM client that can produce structured JSON completions."""
 
     @property

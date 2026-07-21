@@ -94,7 +94,21 @@ class GeometryActionType(str, Enum):
     PARALLEL = "PARALLEL"
     ANGLE_BISECTOR = "ANGLE_BISECTOR"
     CREATE_FUNCTION = "CREATE_FUNCTION"
+    DEFINE_OBJECT = "DEFINE_OBJECT"
     EXECUTE_COMMAND = "EXECUTE_COMMAND"
+
+
+class DefinitionObjectType(str, Enum):
+    function = "function"
+    equation = "equation"
+    expression = "expression"
+    number = "number"
+    point = "point"
+    vector = "vector"
+    list = "list"
+    text = "text"
+    boolean = "boolean"
+    interval = "interval"
 
 
 def _validate_expression(value: str, *, equation_side: bool = False) -> str:
@@ -260,6 +274,39 @@ GeoGebraArgument: TypeAlias = Annotated[
 ListArgument.model_rebuild(_types_namespace={"GeoGebraArgument": GeoGebraArgument})
 
 
+class DefinitionEquationArgument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["equation"]
+    value: str = Field(min_length=3, max_length=MAX_EXPRESSION_LENGTH)
+
+    @field_validator("value")
+    @classmethod
+    def validate_definition_equation(cls, value: str) -> str:
+        value = value.strip()
+        if value.count("=") != 1:
+            raise ValueError("A definition equation must contain exactly one '=' sign.")
+        if any(token in value for token in (";", "\n", "\r", '"', "'", "//")):
+            raise ValueError("Definition equation contains a command separator or quote.")
+        if value.count("(") != value.count(")") or value.count("[") != value.count("]"):
+            raise ValueError("Definition equation delimiters are unbalanced.")
+        return value
+
+
+DefinitionValue: TypeAlias = Annotated[
+    DefinitionEquationArgument
+    | ExpressionArgument
+    | NumberArgument
+    | PointArgument
+    | VectorArgument
+    | TextArgument
+    | BooleanArgument
+    | ListArgument
+    | IntervalArgument,
+    Field(discriminator="kind"),
+]
+
+
 def argument_depth(argument: GeoGebraArgument) -> int:
     if not isinstance(argument, ListArgument) or not argument.items:
         return 1
@@ -341,6 +388,8 @@ class GeometryAction(BaseModel):
     action: GeometryActionType
     label: GeoGebraLabel | None = None
     output: GeoGebraLabel | None = None
+    object_type: DefinitionObjectType | None = None
+    value: DefinitionValue | None = None
     command: Annotated[str, Field(pattern=COMMAND_PATTERN)] | None = None
     arguments: list[GeoGebraArgument] = Field(
         default_factory=list, max_length=MAX_COMMAND_ARGUMENTS
@@ -370,9 +419,47 @@ class GeometryAction(BaseModel):
                     raise ValueError(
                         f"Argument nesting may not exceed {MAX_ARGUMENT_DEPTH} levels."
                     )
-        elif self.output is not None or self.command is not None or self.arguments:
+            if self.object_type is not None or self.value is not None:
+                raise ValueError(
+                    "object_type and value are only valid for DEFINE_OBJECT."
+                )
+        elif self.action is GeometryActionType.DEFINE_OBJECT:
+            if self.output is None or self.object_type is None or self.value is None:
+                raise ValueError(
+                    "DEFINE_OBJECT requires output, object_type, and value."
+                )
+            if self.label is not None or self.command is not None or self.arguments:
+                raise ValueError(
+                    "DEFINE_OBJECT uses output/value and cannot use label, command, or arguments."
+                )
+            if (
+                self.points
+                or self.coordinates is not None
+                or self.center is not None
+                or self.radius is not None
+                or self.through is not None
+                or self.line is not None
+                or self.equation is not None
+                or self.metadata
+            ):
+                raise ValueError(
+                    "DEFINE_OBJECT cannot contain fields from specialized actions."
+                )
+            if argument_depth(self.value) > MAX_ARGUMENT_DEPTH:
+                raise ValueError(
+                    f"Definition nesting may not exceed {MAX_ARGUMENT_DEPTH} levels."
+                )
+            self._validate_definition_value()
+        elif (
+            self.output is not None
+            or self.command is not None
+            or self.arguments
+            or self.object_type is not None
+            or self.value is not None
+        ):
             raise ValueError(
-                "command, output, and arguments are only valid for EXECUTE_COMMAND."
+                "command/output/arguments are only valid for EXECUTE_COMMAND; "
+                "object_type/output/value are only valid for DEFINE_OBJECT."
             )
         if self.equation is not None:
             self.equation = _validate_expression(self.equation)
@@ -380,9 +467,51 @@ class GeometryAction(BaseModel):
             raise ValueError("Radius must be a positive finite number.")
         return self
 
+    def _validate_definition_value(self) -> None:
+        expected_kind = {
+            DefinitionObjectType.function: "equation",
+            DefinitionObjectType.equation: "equation",
+            DefinitionObjectType.expression: "expression",
+            DefinitionObjectType.number: "number",
+            DefinitionObjectType.point: "point",
+            DefinitionObjectType.vector: "vector",
+            DefinitionObjectType.list: "list",
+            DefinitionObjectType.text: "text",
+            DefinitionObjectType.boolean: "boolean",
+            DefinitionObjectType.interval: "interval",
+        }[self.object_type]
+        if self.value is None or self.value.kind != expected_kind:
+            raise ValueError(
+                f"DEFINE_OBJECT object_type '{self.object_type.value}' requires "
+                f"a '{expected_kind}' value."
+            )
+        if not isinstance(self.value, DefinitionEquationArgument):
+            return
+
+        left, right = (part.strip() for part in self.value.value.split("=", maxsplit=1))
+        if self.object_type is DefinitionObjectType.function:
+            match = re.fullmatch(
+                rf"({LABEL_PATTERN[1:-1]})\s*\(\s*x\s*\)", left
+            )
+            if match is None or match.group(1) != self.output:
+                raise ValueError(
+                    "A function definition must use the output label on the left, as f(x)."
+                )
+            self.value.value = f"{self.output}(x) = {_validate_expression(right)}"
+            return
+
+        normalized_left = _validate_expression(left, equation_side=True)
+        normalized_right = _validate_expression(right, equation_side=True)
+        self.value.value = f"{normalized_left} = {normalized_right}"
+
     @property
     def output_label(self) -> str | None:
-        return self.output if self.action is GeometryActionType.EXECUTE_COMMAND else self.label
+        if self.action in {
+            GeometryActionType.EXECUTE_COMMAND,
+            GeometryActionType.DEFINE_OBJECT,
+        }:
+            return self.output
+        return self.label
 
 
 class GeometryDSL(BaseModel):

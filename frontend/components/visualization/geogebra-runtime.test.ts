@@ -92,6 +92,15 @@ describe("structured rendering controls", () => {
       ["3d", false],
       ["perspective", "4"],
     ]);
+
+    calls.length = 0;
+    configureGeoGebraView(api, "graphics_3d");
+
+    expect(calls).toEqual([
+      ["cas", false],
+      ["3d", true],
+      ["perspective", "T"],
+    ]);
   });
 
   test("applies safe styling, viewport, and interaction API calls", () => {

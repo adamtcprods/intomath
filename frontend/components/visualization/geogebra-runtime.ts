@@ -54,7 +54,8 @@ const SAFE_COLOR = /^#[0-9A-Fa-f]{6}$/;
 export const PERSPECTIVES: Record<VisualizationEnvironment, string> = {
   geometry_2d: "2",
   graphing: "1",
-  graphics_3d: "5",
+  // "5" is the 3D preset, which includes Algebra ("AT"). "T" is 3D only.
+  graphics_3d: "T",
   cas: "4",
   probability: "6",
   statistics: "6",

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import pytest
 
 from app.schemas.common import Difficulty, ProblemType
 from app.services.local_solver_selector import LocalSolverSelector
@@ -238,8 +237,8 @@ def test_selector_skips_trivia_solver_when_feature_disabled() -> None:
     assert trivia_client.calls == 0
 
 
-def test_selector_deterministic_solver_takes_priority_over_trivia() -> None:
-    """Equations must still be solved deterministically, not handed to trivia."""
+def test_selector_does_not_pattern_match_when_selection_ai_is_disabled() -> None:
+    """Computational prompts fall through without AI tool selection."""
     trivia_client = FakeLlamaClient(GOOD_TRIVIA_PAYLOAD)
     trivia_solver = LlamaTriviaSolver(llama_client=trivia_client)  # type: ignore[arg-type]
 
@@ -257,7 +256,5 @@ def test_selector_deterministic_solver_takes_priority_over_trivia() -> None:
         )
     )
 
-    assert result is not None
-    assert result.answer.latex == "x = 6"
-    # The trivia solver must not have been called.
+    assert result is None
     assert trivia_client.calls == 0

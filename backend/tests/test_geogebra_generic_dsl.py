@@ -6,6 +6,7 @@ from app.schemas.geometry_dsl import (
     GeometryDSL,
     ValidationSeverity,
 )
+from app.services.geogebra_command_registry import GeoGebraObjectType
 from app.services.geogebra_translator import GeoGebraTranslator
 
 
@@ -22,6 +23,110 @@ def test_geometry_dsl_defaults_to_version_1_1() -> None:
 def test_geometry_dsl_rejects_version_1_0() -> None:
     with pytest.raises(ValidationError):
         GeometryDSL.model_validate({"version": "1.0", "actions": []})
+
+
+def test_define_object_function_is_validated_and_translated() -> None:
+    dsl = _dsl(
+        [
+            {
+                "action": "DEFINE_OBJECT",
+                "output": "f",
+                "object_type": "function",
+                "value": {"kind": "equation", "value": "f(x)=x^2"},
+            }
+        ],
+        environment="graphing",
+    )
+
+    result = GeoGebraTranslator().translate(dsl)
+
+    assert result.validation_passed is True
+    assert result.commands == ["f(x) = x^2"]
+
+
+def test_define_object_values_are_deterministic_and_reference_aware() -> None:
+    dsl = _dsl(
+        [
+            {
+                "action": "DEFINE_OBJECT",
+                "output": "values",
+                "object_type": "list",
+                "value": {
+                    "kind": "list",
+                    "items": [
+                        {"kind": "reference", "value": "n"},
+                        {"kind": "number", "value": 2},
+                    ],
+                },
+            },
+            {
+                "action": "DEFINE_OBJECT",
+                "output": "n",
+                "object_type": "number",
+                "value": {"kind": "number", "value": 3},
+            },
+            {
+                "action": "DEFINE_OBJECT",
+                "output": "unitCircle",
+                "object_type": "equation",
+                "value": {
+                    "kind": "equation",
+                    "value": "x^2+y^2=1",
+                },
+            },
+        ]
+    )
+
+    result = GeoGebraTranslator().translate(dsl)
+
+    assert result.validation_passed is True
+    assert result.commands == [
+        "n = 3",
+        "values = {n, 2}",
+        "unitCircle: x^2+y^2 = 1",
+    ]
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {
+            "action": "DEFINE_OBJECT",
+            "output": "f",
+            "object_type": "function",
+            "value": {"kind": "equation", "value": "g(x) = x^2"},
+        },
+        {
+            "action": "DEFINE_OBJECT",
+            "output": "f",
+            "object_type": "function",
+            "value": {"kind": "equation", "value": "f(x) = x; Delete(A)"},
+        },
+        {
+            "action": "DEFINE_OBJECT",
+            "output": "n",
+            "object_type": "number",
+            "value": {"kind": "expression", "value": "2"},
+        },
+        {
+            "action": "DEFINE_OBJECT",
+            "output": "n",
+            "label": "n",
+            "object_type": "number",
+            "value": {"kind": "number", "value": 2},
+        },
+        {
+            "action": "DEFINE_OBJECT",
+            "output": "n",
+            "object_type": "number",
+            "value": {"kind": "number", "value": 2},
+            "points": ["A"],
+        },
+    ],
+)
+def test_define_object_rejects_mismatched_or_unsafe_shapes(action: dict) -> None:
+    with pytest.raises(ValidationError):
+        _dsl([action])
 
 
 def test_generic_tangent_is_dependency_sorted_and_translated() -> None:
@@ -73,9 +178,14 @@ def test_generic_rotate_formats_degree_angle() -> None:
         ]
     )
 
-    result = GeoGebraTranslator().translate(dsl, allowed_command_names={"Rotate"})
+    translator = GeoGebraTranslator()
+    result = translator.translate(dsl, allowed_command_names={"Rotate"})
+    validation = translator.validator.validate(
+        dsl, allowed_command_names={"Rotate"}
+    )
 
     assert result.commands[-1] == "rotatedA = Rotate(A, 90°, O)"
+    assert validation.object_types["rotatedA"] is GeoGebraObjectType.POINT
 
 
 def test_every_argument_kind_has_deterministic_serialization() -> None:
@@ -285,6 +395,95 @@ def test_argument_count_type_environment_and_retrieval_are_enforced() -> None:
     assert {issue.code for issue in translator.translate(
         not_retrieved, allowed_command_names=set()
     ).issues} >= {"command_not_retrieved"}
+
+
+def test_retrieved_experimental_command_translates_with_runtime_warning() -> None:
+    dsl = _dsl(
+        [
+            {
+                "action": "EXECUTE_COMMAND",
+                "output": "d",
+                "command": "Derivative",
+                "arguments": [{"kind": "expression", "value": "x^2"}],
+            }
+        ],
+        environment="graphing",
+    )
+
+    result = GeoGebraTranslator().translate(
+        dsl, allowed_command_names={"Derivative"}
+    )
+
+    assert result.validation_passed is True
+    assert result.commands == ["d = Derivative(x^2)"]
+    assert any(
+        issue.code == "experimental_command"
+        and issue.severity is ValidationSeverity.warning
+        for issue in result.issues
+    )
+
+
+def test_retrieval_allowlist_cannot_override_permanent_denylist() -> None:
+    dsl = _dsl(
+        [
+            {
+                "action": "EXECUTE_COMMAND",
+                "command": "Execute",
+                "arguments": [
+                    {"kind": "text", "value": "Line(A, B)"}
+                ],
+            }
+        ]
+    )
+
+    result = GeoGebraTranslator().translate(
+        dsl, allowed_command_names={"Execute"}
+    )
+
+    assert result.validation_passed is False
+    assert result.commands == []
+    assert {issue.code for issue in result.issues} == {"unsafe_command"}
+
+
+def test_nested_lists_represent_matrix_arguments() -> None:
+    dsl = _dsl(
+        [
+            {
+                "action": "EXECUTE_COMMAND",
+                "output": "det",
+                "command": "Determinant",
+                "arguments": [
+                    {
+                        "kind": "list",
+                        "items": [
+                            {
+                                "kind": "list",
+                                "items": [
+                                    {"kind": "number", "value": 1},
+                                    {"kind": "number", "value": 2},
+                                ],
+                            },
+                            {
+                                "kind": "list",
+                                "items": [
+                                    {"kind": "number", "value": 3},
+                                    {"kind": "number", "value": 4},
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+        environment="graphing",
+    )
+
+    result = GeoGebraTranslator().translate(
+        dsl, allowed_command_names={"Determinant"}
+    )
+
+    assert result.validation_passed is True
+    assert result.commands == ["det = Determinant({{1, 2}, {3, 4}})"]
 
 
 def test_no_output_is_allowed_but_warned_and_remains_unreferenceable() -> None:

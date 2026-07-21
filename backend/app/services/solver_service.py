@@ -74,6 +74,8 @@ from app.services.solver_pipeline.content_quality import (  # noqa: F401
 
 _RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(ttl_seconds=900, max_size=500)
 logger = logging.getLogger(__name__)
+_CACHE_RESPONSE_VERSION = 5
+_VISUALIZATION_PIPELINE_VERSION = "geogebra-catalog-1.4-semantic-retrieval-v4-dimensions"
 
 
 class SolverService:
@@ -394,8 +396,15 @@ class SolverService:
         return "request_failure"
 
     def _build_cache_key(self, normalized_text: str, request: SolveRequest) -> str:
+        registry_metadata = getattr(
+            getattr(self.translator, "registry", None), "metadata", {}
+        )
         payload = {
-            "response_version": 2,
+            "response_version": _CACHE_RESPONSE_VERSION,
+            "visualization_pipeline_version": _VISUALIZATION_PIPELINE_VERSION,
+            "catalog_schema_version": registry_metadata.get("schema_version"),
+            "catalog_generator_version": registry_metadata.get("generator_version"),
+            "catalog_upstream_commit": registry_metadata.get("upstream_commit"),
             "text": normalized_text,
             "language": request.input.language,
             "options": request.options.model_dump(mode="json"),
