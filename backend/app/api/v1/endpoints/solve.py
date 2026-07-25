@@ -1,9 +1,8 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.dependencies import get_solver_service
 from app.schemas.solve import SolveRequest, SolveResponse
 from app.services.solver_service import SolverService
 
@@ -14,7 +13,8 @@ router = APIRouter()
 
 @router.post("/solve", response_model=SolveResponse, status_code=status.HTTP_200_OK)
 async def solve_problem(
-    request: SolveRequest, db: Session = Depends(get_db)
+    request: SolveRequest,
+    service: SolverService = Depends(get_solver_service),
 ) -> SolveResponse:
     """Solve a math problem and return a structured step-by-step response."""
     input_type = "image" if request.input.image_base64 else "text"
@@ -25,7 +25,6 @@ async def solve_problem(
         request.options.include_visualization,
     )
     try:
-        service = SolverService(db)
         response = await service.solve(request)
         logger.info(
             "Solve endpoint completed request_id=%s status=%s cached=%s",

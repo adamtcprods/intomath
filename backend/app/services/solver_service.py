@@ -95,8 +95,16 @@ class SolverService:
     ) -> None:
         self.db = db
         self.settings = settings or get_settings()
-        self.nvidia_client = nvidia_client or NvidiaClient()
-        self.llama_client = llama_client or LlamaClient()
+        self._owns_nvidia_client = nvidia_client is None
+        self._owns_llama_client = llama_client is None
+        self.nvidia_client = (
+            nvidia_client
+            if nvidia_client is not None
+            else NvidiaClient(self.settings)
+        )
+        self.llama_client = (
+            llama_client if llama_client is not None else LlamaClient(self.settings)
+        )
         self.router = router or ModelRouter(self.llama_client)
         self.ocr_service = ocr_service or OCRService()
         self.geometry_extractor = geometry_extractor or GeometryExtractor(
@@ -107,6 +115,19 @@ class SolverService:
         self.local_solver_selector = local_solver_selector or LocalSolverSelector(
             self.fallback_solver, self.llama_client
         )
+
+    async def aclose(self) -> None:
+        """Close only model clients constructed by this service.
+
+        Request-scoped services receive lifespan clients and therefore cannot close
+        the shared pools through this method.
+        """
+        try:
+            if self._owns_nvidia_client:
+                await self.nvidia_client.aclose()  # type: ignore[attr-defined]
+        finally:
+            if self._owns_llama_client:
+                await self.llama_client.aclose()
 
     async def solve(self, request: SolveRequest) -> SolveResponse:
         return await solve_request(self, request, _RESPONSE_CACHE)

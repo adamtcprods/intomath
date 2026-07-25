@@ -118,6 +118,43 @@ def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:
     assert exc_info.value.response_body == error_body
 
 
+def test_nvidia_client_reuses_one_mock_transport_pool_and_closes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "model": NVIDIA_GPT_OSS_20B_MODEL,
+                "choices": [{"message": {"content": '{"ok":true}'}}],
+            },
+        )
+
+    client = NvidiaClient(_settings(), transport=httpx.MockTransport(handler))
+    underlying_client = client.http_client
+
+    async def run_requests() -> None:
+        for _ in range(2):
+            assert (
+                await client.complete_json(
+                    model=NVIDIA_GPT_OSS_20B_MODEL,
+                    system_prompt="Return JSON.",
+                    user_prompt="Test",
+                )
+                == {"ok": True}
+            )
+            assert client.http_client is underlying_client
+            assert underlying_client.is_closed is False
+        await client.aclose()
+
+    asyncio.run(run_requests())
+
+    assert len(requests) == 2
+    assert underlying_client.is_closed is True
+
+
 def test_nvidia_parser_prefers_complete_schema_object_over_earlier_fragment() -> None:
     complete_payload = {
         "answer": {"text": "The result is 180 degrees.", "latex": "180^\\circ"},

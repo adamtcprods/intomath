@@ -38,9 +38,22 @@ class NvidiaClient:
         settings: Any | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self.transport = transport
+        if transport is not None and http_client is not None:
+            raise ValueError("Pass either transport or http_client, not both.")
+        self._owns_http_client = http_client is None
+        self.http_client = http_client or httpx.AsyncClient(transport=transport)
+
+    async def aclose(self) -> None:
+        """Close the owned connection pool.
+
+        Injected HTTP clients remain owned by their caller. Application-created
+        clients are closed by the FastAPI lifespan.
+        """
+        if self._owns_http_client and not self.http_client.is_closed:
+            await self.http_client.aclose()
 
     @property
     def enabled(self) -> bool:
@@ -123,66 +136,64 @@ class NvidiaClient:
             write=min(10.0, request_timeout),
             pool=min(10.0, request_timeout),
         )
-        async with httpx.AsyncClient(
-            timeout=timeout, transport=self.transport
-        ) as client:
-            try:
-                response = await asyncio.wait_for(
-                    client.post(
-                        f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {self.settings.nvidia_api_key}",
-                            "Content-Type": "application/json",
-                            "Accept": "application/json",
-                        },
-                        json=payload,
-                    ),
-                    timeout=request_timeout,
-                )
-            except (TimeoutError, httpx.TimeoutException) as exc:
-                error = IntegrationRequestError(
-                    f"NVIDIA direct request timed out after {request_timeout:.1f}s "
-                    f"for model {model}.",
-                    provider="NVIDIA",
-                    model=model,
-                    operation=operation,
-                )
-                diagnostics = exception_diagnostics(error)
-                logger.warning(
-                    "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
-                    "error_type=%s error_message=%s status_code=%s response_body=%s",
-                    operation,
-                    trace_id,
-                    model,
-                    diagnostics.error_type,
-                    diagnostics.error_message,
-                    diagnostics.status_code,
-                    diagnostics.response_body,
-                )
-                raise error from exc
-            except httpx.HTTPError as exc:
-                diagnostics = exception_diagnostics(exc)
-                error = IntegrationRequestError(
-                    f"NVIDIA direct request failed for model {model}: "
-                    f"{diagnostics.error_message}",
-                    provider="NVIDIA",
-                    model=model,
-                    operation=operation,
-                    status_code=diagnostics.status_code,
-                    response_body=diagnostics.response_body,
-                )
-                logger.warning(
-                    "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
-                    "error_type=%s error_message=%s status_code=%s response_body=%s",
-                    operation,
-                    trace_id,
-                    model,
-                    diagnostics.error_type,
-                    diagnostics.error_message,
-                    diagnostics.status_code,
-                    diagnostics.response_body,
-                )
-                raise error from exc
+        try:
+            response = await asyncio.wait_for(
+                self.http_client.post(
+                    f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.settings.nvidia_api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json=payload,
+                    timeout=timeout,
+                ),
+                timeout=request_timeout,
+            )
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            error = IntegrationRequestError(
+                f"NVIDIA direct request timed out after {request_timeout:.1f}s "
+                f"for model {model}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+            )
+            diagnostics = exception_diagnostics(error)
+            logger.warning(
+                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
+                "error_type=%s error_message=%s status_code=%s response_body=%s",
+                operation,
+                trace_id,
+                model,
+                diagnostics.error_type,
+                diagnostics.error_message,
+                diagnostics.status_code,
+                diagnostics.response_body,
+            )
+            raise error from exc
+        except httpx.HTTPError as exc:
+            diagnostics = exception_diagnostics(exc)
+            error = IntegrationRequestError(
+                f"NVIDIA direct request failed for model {model}: "
+                f"{diagnostics.error_message}",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                status_code=diagnostics.status_code,
+                response_body=diagnostics.response_body,
+            )
+            logger.warning(
+                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
+                "error_type=%s error_message=%s status_code=%s response_body=%s",
+                operation,
+                trace_id,
+                model,
+                diagnostics.error_type,
+                diagnostics.error_message,
+                diagnostics.status_code,
+                diagnostics.response_body,
+            )
+            raise error from exc
 
         response_body = compact_log_text(response.text, limit=2_000)
         if response.status_code >= 400:

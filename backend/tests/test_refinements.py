@@ -261,8 +261,8 @@ def test_health_endpoint_success() -> None:
 
 
 def test_solve_endpoint_validation_error() -> None:
-    client = TestClient(app)
-    # Send empty body
-    response = client.post("/api/v1/solve", json={"input": {"text": "   "}})
+    with TestClient(app) as client:
+        # Send empty body
+        response = client.post("/api/v1/solve", json={"input": {"text": "   "}})
     assert response.status_code == 422
     assert "At least one of" in response.text

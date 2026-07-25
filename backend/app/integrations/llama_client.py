@@ -27,8 +27,35 @@ class LlamaClient:
 
     _unavailable_until_by_base_url: ClassVar[dict[str, float]] = {}
 
-    def __init__(self) -> None:
-        self.settings = get_settings()
+    def __init__(
+        self,
+        settings: Any | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        http_client: httpx.AsyncClient | None = None,
+        openai_client: AsyncOpenAI | None = None,
+    ) -> None:
+        if transport is not None and http_client is not None:
+            raise ValueError("Pass either transport or http_client, not both.")
+        self.settings = settings or get_settings()
+        self._owns_http_client = http_client is None
+        self.http_client = http_client or httpx.AsyncClient(transport=transport)
+        self._owns_openai_client = openai_client is None
+        self.openai_client = openai_client or AsyncOpenAI(
+            base_url=f"{self._configured_base_url()}/v1",
+            api_key="llama-server",
+            max_retries=0,
+            http_client=self.http_client,
+        )
+
+    async def aclose(self) -> None:
+        """Close model and health-check pools owned by this wrapper."""
+        try:
+            if self._owns_openai_client:
+                await self.openai_client.close()
+        finally:
+            if self._owns_http_client and not self.http_client.is_closed:
+                await self.http_client.aclose()
 
     @property
     def enabled(self) -> bool:
@@ -64,10 +91,10 @@ class LlamaClient:
         base_url = self._configured_base_url()
         health_url = f"{base_url}/health"
         try:
-            async with httpx.AsyncClient(timeout=request_timeout) as client:
-                response = await asyncio.wait_for(
-                    client.get(health_url), timeout=request_timeout
-                )
+            response = await asyncio.wait_for(
+                self.http_client.get(health_url, timeout=request_timeout),
+                timeout=request_timeout,
+            )
             if response.status_code >= 400:
                 raise IntegrationRequestError(
                     f"Llama-server health probe returned HTTP {response.status_code}.",
@@ -135,12 +162,6 @@ class LlamaClient:
         request_max_tokens = max_tokens if max_tokens is not None else 500
         base_url = f"{self._configured_base_url()}/v1"
 
-        client = AsyncOpenAI(
-            base_url=base_url,
-            api_key="llama-server",
-            max_retries=0,
-        )
-
         response_format: dict[str, Any] = {"type": "json_object"}
         if json_schema is not None:
             response_format = {
@@ -168,7 +189,7 @@ class LlamaClient:
                 else None
             )
             response = await asyncio.wait_for(
-                client.chat.completions.create(
+                self.openai_client.chat.completions.create(
                     model=selected_model,
                     messages=[{"role": "user", "content": prompt}],
                     response_format=response_format,  # type: ignore[arg-type]
