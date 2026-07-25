@@ -3,10 +3,6 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from app.db.base import Base
 from app.schemas.solve import ProblemInput, SolveRequest, SolveResponse
 from app.services.cache import TTLCache
 from app.services.solver_service import SolverService
@@ -58,13 +54,8 @@ def test_ttl_cache_refinements() -> None:
 
 
 def test_cache_key_includes_language() -> None:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    service = SolverService()
     try:
-        service = SolverService(db)
-        
         req_en = SolveRequest.model_validate({
             "input": {"text": "Solve 2+2", "language": "en"},
             "options": {"include_visualization": False}
@@ -80,7 +71,7 @@ def test_cache_key_includes_language() -> None:
         # Check they do not collide
         assert key_en != key_vi
     finally:
-        db.close()
+        asyncio.run(service.aclose())
 
 
 def test_cache_key_includes_catalog_and_visualization_versions() -> None:

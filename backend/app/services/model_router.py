@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from app.schemas.common import Difficulty, ProblemType
@@ -29,9 +30,16 @@ NVIDIA_LARGE_MODELS = frozenset(
 )
 NVIDIA_DIRECT_ROUTING_PREFIX = "nvidia-direct:"
 LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
+LOCAL_SAFE_FALLBACK_MODEL = "local:safe-fallback"
 LOCAL_LLAMA_GEOMETRY_PARSER_MODEL = "local:llama-geometry-parser"
 LOCAL_LLAMA_TRIVIA_MODEL = "local:llama-trivia"
 VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
+
+
+class SolveRoute(str, Enum):
+    deterministic = "deterministic"
+    local_trivia = "local_trivia"
+    remote = "remote"
 
 
 @dataclass(frozen=True)
@@ -65,8 +73,9 @@ def remote_model_timeout_seconds(
         )
     return float(getattr(settings, "remote_model_attempt_timeout_seconds", 25.0))
 
-ROUTER_CLASSIFICATION_PROMPT = """
-Classify one math prompt. Return only the schema-constrained JSON object.
+UNIFIED_ROUTING_PROMPT = """
+Make one routing decision for a math prompt. Return only the schema-constrained
+JSON object. Do not solve the problem.
 
 problem_type is exactly one of:
 - arithmetic
@@ -81,6 +90,18 @@ problem_type is exactly one of:
 
 difficulty is exactly one of easy, medium, or hard.
 
+solve_route is exactly one of:
+- deterministic: only when the ORIGINAL prompt already has one of these exact
+  executable shapes: a numeric arithmetic expression; one linear equation or
+  inequality in x; or y=/f(x)= quadratic graph analysis. Geometry, proofs, word
+  problems, systems, and uncertain prompts must never use this route.
+- local_trivia: a short, non-proof math fact, definition, or concept question
+  that the local trivia tutor can answer.
+- remote: every other problem.
+
+normalized_prompt is a concise cleaned version of the original prompt. It is
+advisory metadata only and cannot make an unsupported prompt deterministic.
+
 visualization_environment is exactly one of:
 - graphics_3d: a useful/requested three-dimensional object, solid, surface, or spatial-coordinate scene
 - geometry_2d: planar geometry or a geometric construction
@@ -91,12 +112,11 @@ visualization_environment is exactly one of:
 - spreadsheet: tabular/cell-based computation
 - none: no useful interactive mathematical representation
 
-has_three_dimensional_structure is true exactly when the prompt describes or
-requests a three-dimensional object, solid, surface, or spatial-coordinate scene.
-
 visualization_search_terms is an array of 0 to 8 short English GeoGebra
 operation terms or likely command names. Use an empty array when the environment
 is none. Do not solve the prompt or invent objects, coordinates, or relationships.
+
+reason is one short sentence explaining the route.
 
 Follow the environment definitions literally. A request to visualize, draw,
 construct, graph, plot, chart, or use a named view must not be none. Function
@@ -104,14 +124,12 @@ graphs use graphing, not geometry_2d. Planar constructions use geometry_2d.
 A three-dimensional solid uses graphics_3d, not geometry_2d.
 
 Representative classifications:
-- "Show a spatial solid" -> geometry, medium, graphics_3d
-- "Construct a planar polygon" -> geometry, medium, geometry_2d
-- "Graph f(x)=x^2" -> algebra, medium, graphing
-- "Plot a histogram of these values" -> statistics, medium, statistics
-- "Display a probability distribution" -> probability, medium, probability
-- "Simplify an expression using CAS" -> algebra, medium, cas
-- "Enter values in spreadsheet cells" -> general, easy, spreadsheet
-- "What is 2+2?" -> arithmetic, easy, none
+- "Show a spatial solid" -> geometry, medium, remote, graphics_3d
+- "Construct a planar polygon" -> geometry, medium, remote, geometry_2d
+- "Graph f(x)=x^2" -> algebra, medium, deterministic, graphing
+- "What is a prime number?" -> number_theory, easy, local_trivia, none
+- "Plot a histogram of these values" -> statistics, medium, remote, statistics
+- "Solve this word problem ..." -> general, medium, remote, none
 
 Difficulty guidance:
 - easy
@@ -127,7 +145,7 @@ Difficulty guidance:
 - Use easy for short routine arithmetic/algebra prompts.
 """.strip()
 
-ROUTER_RESPONSE_SCHEMA: dict[str, Any] = {
+UNIFIED_ROUTING_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "problem_type": {
@@ -138,26 +156,41 @@ ROUTER_RESPONSE_SCHEMA: dict[str, Any] = {
             "type": "string",
             "enum": [difficulty.value for difficulty in Difficulty],
         },
+        "solve_route": {
+            "type": "string",
+            "enum": [route.value for route in SolveRoute],
+        },
+        "normalized_prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4_000,
+        },
         "visualization_environment": {
             "type": "string",
             "enum": [*[item.value for item in VisualizationEnvironment], "none"],
         },
-        "has_three_dimensional_structure": {"type": "boolean"},
         "visualization_search_terms": {
             "type": "array",
             "items": {"type": "string", "minLength": 1, "maxLength": 40},
             "maxItems": 8,
         },
+        "reason": {"type": "string", "minLength": 1, "maxLength": 240},
     },
     "required": [
         "problem_type",
         "difficulty",
+        "solve_route",
+        "normalized_prompt",
         "visualization_environment",
-        "has_three_dimensional_structure",
         "visualization_search_terms",
+        "reason",
     ],
     "additionalProperties": False,
 }
+
+# Kept as aliases for import compatibility.
+ROUTER_CLASSIFICATION_PROMPT = UNIFIED_ROUTING_PROMPT
+ROUTER_RESPONSE_SCHEMA = UNIFIED_ROUTING_RESPONSE_SCHEMA
 
 
 @dataclass
@@ -170,6 +203,8 @@ class RoutingDecision:
     visualization_environment: VisualizationEnvironment | None
     reason: str
     visualization_search_terms: tuple[str, ...] = ()
+    solve_route: SolveRoute = SolveRoute.remote
+    normalized_prompt: str = ""
 
 
 @dataclass(frozen=True)
@@ -178,6 +213,8 @@ class RouterClassification:
     difficulty: Difficulty
     visualization_environment: VisualizationEnvironment | None
     reason: str
+    solve_route: SolveRoute = SolveRoute.remote
+    normalized_prompt: str = ""
     model: str | None = None
     visualization_search_terms: tuple[str, ...] = ()
 
@@ -206,10 +243,14 @@ class ModelRouter:
     def _build_decision(
         self, classification: RouterClassification, *, has_image: bool
     ) -> RoutingDecision:
-        parser_model = EASY_MODEL
+        parser_model = LOCAL_LLAMA_GEOMETRY_PARSER_MODEL
         solver_model = (
             HARD_MODEL if classification.difficulty is Difficulty.hard else EASY_MODEL
         )
+        if classification.solve_route is SolveRoute.deterministic:
+            solver_model = LOCAL_DETERMINISTIC_SOLVER_MODEL
+        elif classification.solve_route is SolveRoute.local_trivia:
+            solver_model = LOCAL_LLAMA_TRIVIA_MODEL
         vision_model = VISION_MODEL if has_image else None
         reason_parts = []
         if has_image:
@@ -221,7 +262,11 @@ class ModelRouter:
             reason_parts.append(
                 f"local llama.cpp router {classification.model} supplied classification"
             )
-        if classification.difficulty is Difficulty.hard:
+        if classification.solve_route is SolveRoute.deterministic:
+            reason_parts.append("selected deterministic execution subject to parser validation")
+        elif classification.solve_route is SolveRoute.local_trivia:
+            reason_parts.append("selected the local trivia tutor")
+        elif classification.difficulty is Difficulty.hard:
             reason_parts.append("escalated to the JSON-stable hard free model")
         else:
             reason_parts.append("kept on the lower-latency JSON-stable model")
@@ -235,6 +280,8 @@ class ModelRouter:
             visualization_environment=classification.visualization_environment,
             reason="; ".join(reason_parts),
             visualization_search_terms=classification.visualization_search_terms,
+            solve_route=classification.solve_route,
+            normalized_prompt=classification.normalized_prompt,
         )
 
     async def _classify_with_llama(self, text: str) -> RouterClassification | None:
@@ -262,12 +309,13 @@ class ModelRouter:
                 difficulty=Difficulty.easy,
                 visualization_environment=None,
                 reason="empty prompt",
+                normalized_prompt="",
                 visualization_search_terms=(),
             )
         if len(stripped) > 4_000:
             return None
 
-        prompt = f"{ROUTER_CLASSIFICATION_PROMPT}\n\nProblem:\n{stripped}"
+        prompt = f"{UNIFIED_ROUTING_PROMPT}\n\nProblem:\n{stripped}"
         try:
             payload = await llama_client.generate_json(
                 prompt=prompt,
@@ -287,8 +335,8 @@ class ModelRouter:
                         8.0,
                     )
                 ),
-                json_schema=ROUTER_RESPONSE_SCHEMA,
-                operation="local_route_classification",
+                json_schema=UNIFIED_ROUTING_RESPONSE_SCHEMA,
+                operation="local_unified_routing",
             )
         except Exception:
             logger.debug(
@@ -299,25 +347,27 @@ class ModelRouter:
 
         problem_type = self._coerce_problem_type(payload.get("problem_type"))
         difficulty = self._coerce_difficulty(payload.get("difficulty"))
+        solve_route = self._coerce_solve_route(payload.get("solve_route"))
+        normalized_prompt = self._coerce_required_string(
+            payload.get("normalized_prompt")
+        )
+        supplied_reason = self._coerce_required_string(payload.get("reason"))
         environment_valid, visualization_environment = (
             self._coerce_visualization_environment(
                 payload.get("visualization_environment")
             )
         )
-        has_three_dimensional_structure = payload.get(
-            "has_three_dimensional_structure"
-        )
         if (
             problem_type is None
             or difficulty is None
+            or solve_route is None
+            or normalized_prompt is None
+            or supplied_reason is None
             or not environment_valid
-            or type(has_three_dimensional_structure) is not bool
         ):
             return None
-        classification_reason = "classified by local router"
-        if has_three_dimensional_structure:
-            visualization_environment = VisualizationEnvironment.graphics_3d
-        elif (
+        classification_reason = supplied_reason
+        if (
             problem_type is ProblemType.geometry
             and visualization_environment is None
         ):
@@ -340,6 +390,8 @@ class ModelRouter:
             difficulty=difficulty,
             visualization_environment=visualization_environment,
             reason=classification_reason,
+            solve_route=solve_route,
+            normalized_prompt=normalized_prompt,
             model=router_model or getattr(llama_client, "model", None),
             visualization_search_terms=visualization_search_terms,
         )
@@ -362,6 +414,7 @@ class ModelRouter:
                 difficulty=Difficulty.easy,
                 visualization_environment=None,
                 reason="empty prompt",
+                normalized_prompt="",
                 visualization_search_terms=(),
             )
         return RouterClassification(
@@ -372,8 +425,24 @@ class ModelRouter:
                 "local router unavailable; subject and visualization environment "
                 "left unclassified"
             ),
+            solve_route=SolveRoute.remote,
+            normalized_prompt=text.strip(),
             visualization_search_terms=(),
         )
+
+    def _coerce_solve_route(self, value: Any) -> SolveRoute | None:
+        if not isinstance(value, str):
+            return None
+        try:
+            return SolveRoute(value.strip().lower())
+        except ValueError:
+            return None
+
+    def _coerce_required_string(self, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     def _coerce_search_terms(self, value: Any) -> tuple[str, ...] | None:
         if not isinstance(value, list):

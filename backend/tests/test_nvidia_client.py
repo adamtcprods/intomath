@@ -60,6 +60,7 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
                 "additionalProperties": False,
             },
             schema_name="test_schema",
+            max_tokens=1_234,
             operation="structured_math_solution",
             trace_id="nvidia-family-test",
         )
@@ -70,6 +71,7 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
     payload = requests[0]
     assert payload["model"] == model
     assert payload["stream"] is False
+    assert payload["max_tokens"] == 1_234
     assert "response_format" not in payload
     assert "Required JSON schema" in payload["messages"][0]["content"]
     assert "JSON-escape every backslash" in payload["messages"][0]["content"]
@@ -85,7 +87,7 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
         ("structured_math_steps_repair", "medium"),
         ("structured_math_solution_repair", "medium"),
         ("geometry_extraction", "low"),
-        ("local_route_classification", "low"),
+        ("local_unified_routing", "low"),
     ],
 )
 def test_nvidia_reasoning_effort_matches_operation(

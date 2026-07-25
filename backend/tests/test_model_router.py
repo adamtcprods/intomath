@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.model_router import (
     EASY_MODEL,
     HARD_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
     ModelRouter,
     remote_model_timeout_seconds,
     structured_model_endpoints,
@@ -43,9 +44,11 @@ class RoutingLlamaClient:
         return {
             "problem_type": "geometry",
             "difficulty": "medium",
-            "visualization_environment": "geometry_2d",
-            "has_three_dimensional_structure": True,
+            "solve_route": "remote",
+            "normalized_prompt": "Visualize a tetrahedron!",
+            "visualization_environment": "graphics_3d",
             "visualization_search_terms": ["Tetrahedron", "solid", "3D"],
+            "reason": "a spatial geometry request needs remote solving",
         }
 
 
@@ -56,9 +59,11 @@ class NoVisualizationLlamaClient(RoutingLlamaClient):
         return {
             "problem_type": "arithmetic",
             "difficulty": "easy",
+            "solve_route": "deterministic",
+            "normalized_prompt": "2 + 2",
             "visualization_environment": "none",
-            "has_three_dimensional_structure": False,
             "visualization_search_terms": [],
+            "reason": "an exact arithmetic expression",
         }
 
 
@@ -69,9 +74,11 @@ class GeometryWithoutVisualizationLlamaClient(RoutingLlamaClient):
         return {
             "problem_type": "geometry",
             "difficulty": "hard",
+            "solve_route": "remote",
+            "normalized_prompt": VIETNAMESE_GEOMETRY_PROOF,
             "visualization_environment": "none",
-            "has_three_dimensional_structure": False,
             "visualization_search_terms": [],
+            "reason": "a geometry proof requires remote solving",
         }
 
 
@@ -82,6 +89,7 @@ def test_sync_router_leaves_subject_unclassified_without_ai() -> None:
     assert routing.difficulty is Difficulty.medium
     assert routing.visualization_environment is None
     assert routing.solver_model == EASY_MODEL
+    assert routing.parser_model == LOCAL_LLAMA_GEOMETRY_PARSER_MODEL
     assert "left unclassified" in routing.reason
 
 
@@ -108,7 +116,7 @@ def test_async_router_does_not_replace_failed_ai_with_keyword_detection() -> Non
     assert "left unclassified" in routing.reason
 
 
-def test_tiny_router_resolves_conflicting_tetrahedron_dimension_as_3d() -> None:
+def test_unified_router_selects_three_dimensional_environment() -> None:
     llama_client = RoutingLlamaClient()
     routing = asyncio.run(
         ModelRouter(llama_client=llama_client).route_async(
@@ -131,9 +139,13 @@ def test_tiny_router_resolves_conflicting_tetrahedron_dimension_as_3d() -> None:
         "spreadsheet",
         "none",
     ]
-    assert llama_client.request["json_schema"]["properties"][
-        "has_three_dimensional_structure"
-    ] == {"type": "boolean"}
+    assert llama_client.request["json_schema"]["properties"]["solve_route"]["enum"] == [
+        "deterministic",
+        "local_trivia",
+        "remote",
+    ]
+    assert "normalized_prompt" in llama_client.request["json_schema"]["properties"]
+    assert "reason" in llama_client.request["json_schema"]["properties"]
     assert routing.problem_type is ProblemType.geometry
     assert routing.difficulty is Difficulty.medium
     assert (

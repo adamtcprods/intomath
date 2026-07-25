@@ -8,6 +8,7 @@ from starlette.requests import Request
 
 import app.main as main_module
 from app.dependencies import SharedModelClients, get_solver_service
+from app.repositories.result_repository import ResultRepository
 
 
 class FakeNvidiaClient:
@@ -52,15 +53,15 @@ def test_lifespan_closes_shared_clients_and_request_services_only_borrow_them(
     with TestClient(main_module.app):
         assert main_module.app.state.model_clients is shared
         request = Request({"type": "http", "app": main_module.app})
-        first_db = object()
-        second_db = object()
 
-        first_service = get_solver_service(request, db=first_db)  # type: ignore[arg-type]
-        second_service = get_solver_service(request, db=second_db)  # type: ignore[arg-type]
+        first_service = get_solver_service(request)
+        second_service = get_solver_service(request)
 
         assert first_service is not second_service
-        assert first_service.db is first_db
-        assert second_service.db is second_db
+        assert not hasattr(first_service, "db")
+        assert not hasattr(second_service, "db")
+        assert isinstance(first_service.result_repository, ResultRepository)
+        assert isinstance(second_service.result_repository, ResultRepository)
         assert first_service.nvidia_client is second_service.nvidia_client is nvidia
         assert first_service.llama_client is second_service.llama_client is llama
 

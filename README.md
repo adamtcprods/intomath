@@ -103,6 +103,14 @@ Current models and local routes:
 - **Explicit JSON fallback routing:** NVIDIA-hosted gpt-oss models with no opaque router alias
 - **OCR / visual extraction locally:** `deepseek-ai/deepseek-ocr-2`
 
+Visualization extraction is local-first whenever the llama.cpp parser is enabled,
+healthy, and the prompt is within its 4,000-character limit. Local unavailability,
+timeout, or invalid output falls back to NVIDIA gpt-oss-20b and then, only if policy
+allows another source, gpt-oss-120b. A 429, timeout, connectivity failure, or rejected
+proposal never repeats the same remote extraction. Valid-schema DSL failures may receive
+one action-scoped repair; every provider/model/operation tuple is attempted at most once
+and all attempts share the overall solve deadline.
+
 Examples:
 - AI-selected arithmetic → `local:deterministic-solver`
 - AI-selected linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
@@ -219,7 +227,9 @@ The frontend uses Bun as its package manager. `frontend/bun.lock` is the canonic
 ```bash
 python3 -m venv .venv-local
 .venv-local/bin/pip install -r backend/requirements.txt
-.venv-local/bin/uvicorn app.main:app --app-dir backend --reload
+cd backend
+../.venv-local/bin/alembic upgrade head
+../.venv-local/bin/uvicorn app.main:app --reload
 ```
 
 Frontend default URL: `http://localhost:3000`
@@ -246,7 +256,7 @@ Backend default URL: `http://localhost:8000`
 - `LOCAL_LLAMA_ENABLED` — defaults to `true`; master switch for the local llama.cpp integration
 - `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; requires local llama-server to select and normalize supported deterministic-execution prompts
 - `LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED` — defaults to `true`; enables the local concept/trivia fallback
-- `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; uses the local model to produce validated visualization DSL for local solve routes
+- `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; makes the healthy local model the primary validated visualization DSL parser
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
 - `LOCAL_SOLVER_LLAMA_MODEL` — defaults to `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL`
 - `LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS` — defaults to `20.0`

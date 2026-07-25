@@ -3,37 +3,33 @@ from typing import Any
 
 from app.schemas.common import Difficulty, ProblemType
 from app.services.local_solver_selector import LocalSolverSelector
+from app.services.model_router import SolveRoute
 
 
 class LocalSolverSettings:
     local_solver_first = True
-    local_solver_llama_detection_enabled = True
+    local_solver_llama_trivia_enabled = False
 
 
 class FakeLlamaClient:
     enabled = True
-    model = "local:test-detector"
+    available = True
+    model = "local:test-router"
 
-    def __init__(self, payload: dict[str, Any] | None = None) -> None:
-        self.payload = payload or {"use_local_solver": False}
+    def __init__(self) -> None:
         self.calls = 0
-        self.last_prompt = ""
 
-    async def generate_json(self, *, prompt: str, **kwargs: Any) -> dict[str, Any]:
+    async def generate_json(self, **_: Any) -> dict[str, Any]:
         self.calls += 1
-        self.last_prompt = prompt
-        return self.payload
+        raise AssertionError("exact execution must not call a model")
 
 
-def test_selector_requires_llama_to_select_deterministic_solver() -> None:
-    llama = FakeLlamaClient(
-        {
-            "use_local_solver": True,
-            "normalized_prompt": "2x + 5 = 3x - 1",
-            "reason": "selected exact linear-equation execution",
-        }
+def test_exact_linear_equation_bypasses_all_models() -> None:
+    llama = FakeLlamaClient()
+    selector = LocalSolverSelector(
+        settings=LocalSolverSettings(),  # type: ignore[arg-type]
+        llama_client=llama,  # type: ignore[arg-type]
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
         selector.solve_if_supported(
@@ -46,93 +42,60 @@ def test_selector_requires_llama_to_select_deterministic_solver() -> None:
     assert result is not None
     assert result.answer.latex == "x = 6"
     assert result.problem_type is ProblemType.algebra
-    assert result.detector_model == "local:test-detector"
-    assert llama.calls == 1
+    assert result.detector_model is None
+    assert llama.calls == 0
 
 
-def test_exact_pattern_does_not_bypass_llama_rejection() -> None:
-    llama = FakeLlamaClient({"use_local_solver": False})
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
+def test_router_normalization_is_not_executable_input() -> None:
+    selector = LocalSolverSelector(
+        settings=LocalSolverSettings(),  # type: ignore[arg-type]
+        llama_client=FakeLlamaClient(),  # type: ignore[arg-type]
+    )
 
     result = asyncio.run(
-        selector.solve_if_supported(
-            "2x + 5 = 3x - 1",
+        selector.solve_selected_route(
+            "Twice the quantity x plus three equals fourteen.",
             ProblemType.algebra,
             Difficulty.easy,
+            SolveRoute.deterministic,
         )
     )
 
     assert result is None
-    assert llama.calls == 1
 
 
-def test_selector_accepts_llama_normalized_supported_prompt() -> None:
-    llama = FakeLlamaClient(
-        {
-            "use_local_solver": True,
-            "normalized_prompt": "x + 5 = 17",
-            "reason": "normalized worded linear equation",
-        }
+def test_selected_deterministic_route_rechecks_original_exact_grammar() -> None:
+    selector = LocalSolverSelector(
+        settings=LocalSolverSettings(),  # type: ignore[arg-type]
+        llama_client=FakeLlamaClient(),  # type: ignore[arg-type]
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
-        selector.solve_if_supported(
-            "Please solve x plus five equals seventeen.",
+        selector.solve_selected_route(
+            "2(x + 3) = 14",
             ProblemType.algebra,
             Difficulty.easy,
-        )
-    )
-
-    assert result is not None
-    assert result.answer.latex == "x = 12"
-    assert result.normalized_text == "x + 5 = 17"
-    assert result.detector_model == "local:test-detector"
-    assert "strict routing classifier" in llama.last_prompt
-
-
-def test_selector_accepts_llama_normalized_parenthesized_equation() -> None:
-    llama = FakeLlamaClient(
-        {
-            "use_local_solver": True,
-            "normalized_prompt": "2(x + 3) = 14",
-            "reason": "normalized worded parenthesized equation",
-        }
-    )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
-
-    result = asyncio.run(
-        selector.solve_if_supported(
-            "Twice the quantity x plus three equals fourteen.",
-            ProblemType.algebra,
-            Difficulty.easy,
+            SolveRoute.deterministic,
         )
     )
 
     assert result is not None
     assert result.answer.latex == "x = 4"
-    assert result.normalized_text == "2(x + 3) = 14"
-    assert result.detector_model == "local:test-detector"
-    assert "parentheses" in llama.last_prompt
 
 
-def test_selector_rejects_llama_hint_if_deterministic_solver_cannot_solve_it() -> None:
-    llama = FakeLlamaClient(
-        {
-            "use_local_solver": True,
-            "normalized_prompt": "prove the triangle statement",
-            "reason": "bad hint",
-        }
+def test_geometry_never_executes_through_deterministic_route() -> None:
+    selector = LocalSolverSelector(
+        settings=LocalSolverSettings(),  # type: ignore[arg-type]
+        llama_client=FakeLlamaClient(),  # type: ignore[arg-type]
     )
-    selector = LocalSolverSelector(settings=LocalSolverSettings(), llama_client=llama)  # type: ignore[arg-type]
 
     result = asyncio.run(
-        selector.solve_if_supported(
-            "Please draw a triangle-like object with extra constraints.",
+        selector.solve_selected_route(
+            "Construct triangle ABC with AB = 3.",
             ProblemType.geometry,
             Difficulty.medium,
+            SolveRoute.deterministic,
         )
     )
 
     assert result is None
-    assert llama.calls == 0

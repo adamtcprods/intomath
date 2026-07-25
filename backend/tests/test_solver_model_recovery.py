@@ -11,7 +11,11 @@ def test_twenty_b_model_recovers_solution_after_large_model_timeout() -> None:
     class CompletionClient:
         enabled = True
 
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
         async def complete_json(self, **kwargs: object) -> dict:
+            self.requests.append(kwargs)
             operation = kwargs.get("operation")
             model = kwargs.get("model")
             if operation == "structured_math_solution" and model == HARD_MODEL:
@@ -40,10 +44,14 @@ def test_twenty_b_model_recovers_solution_after_large_model_timeout() -> None:
             raise AssertionError(f"Unexpected operation: {operation}")
 
     service = SolverService.__new__(SolverService)
-    service.nvidia_client = CompletionClient()
+    completion_client = CompletionClient()
+    service.nvidia_client = completion_client
     service.settings = SimpleNamespace(
         remote_model_attempt_timeout_seconds=25.0,
         nvidia_large_model_attempt_timeout_seconds=50.0,
+        structured_solution_max_tokens=4_500,
+        missing_step_repair_max_tokens=2_000,
+        content_repair_max_tokens=2_500,
     )
     service.fallback_solver = FallbackSolver()
 
@@ -62,3 +70,10 @@ def test_twenty_b_model_recovers_solution_after_large_model_timeout() -> None:
     assert len(draft.steps) == 3
     assert draft.solver_model.endswith(NVIDIA_GPT_OSS_20B_MODEL)
     assert any("preferred solver was unavailable" in item for item in draft.warnings)
+    assert {
+        request["operation"]: request["max_tokens"]
+        for request in completion_client.requests
+    } == {
+        "structured_math_solution": 4_500,
+        "structured_math_steps_repair": 2_000,
+    }

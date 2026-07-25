@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import get_solver_service
 from app.schemas.solve import SolveRequest, SolveResponse
+from app.services.input_validation import SolveInputError
 from app.services.solver_service import SolverService
+from app.services.solver_pipeline.errors import SolveRequestTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,21 @@ async def solve_problem(
             response.cached,
         )
         return response
+    except SolveRequestTimeoutError as exc:
+        logger.warning(
+            "Solve endpoint returning timeout request_id=%s stage=%s",
+            exc.request_id,
+            exc.stage,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="The solve request exceeded its time limit. Please try again.",
+        ) from None
+    except SolveInputError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=str(exc),
+        ) from None
     except Exception as exc:
         logger.exception("Unexpected error in solve endpoint")
         raise HTTPException(

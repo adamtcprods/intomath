@@ -7,23 +7,23 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from app.core.config import get_settings
 from app.integrations.errors import exception_diagnostics
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
 from app.integrations.protocols import StructuredCompletionClient
+from app.repositories.result_repository import ResultRepository
 from app.schemas.common import Difficulty, ProblemType
 from app.schemas.solve import SolveRequest, SolveResponse
 from app.services.cache import TTLCache
 from app.services.fallback_solver import FallbackSolver
+from app.services.exact_solver import ExactSolveResult
 from app.services.geogebra_translator import GeoGebraTranslator
 from app.services.geometry_extractor import GeometryExtractor
 from app.services.local_solver_selector import LocalSolverSelector
 from app.services.local_solver_types import LocalSolveResult
 from app.services.model_router import (
-    LOCAL_DETERMINISTIC_SOLVER_MODEL,
+    LOCAL_SAFE_FALLBACK_MODEL,
     ModelRouter,
     RoutingDecision,
     StructuredModelEndpoint,
@@ -51,6 +51,7 @@ from app.services.solver_pipeline.routing import (
     is_supported_local_draft,
     with_local_solver_routing,
     with_local_subquestion_routing,
+    with_remote_solver_routing,
     with_structured_solver_routing,
     without_backend_config_warnings,
 )
@@ -72,17 +73,21 @@ from app.services.solver_pipeline.content_quality import (  # noqa: F401
 )
 
 
-_RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(ttl_seconds=900, max_size=500)
+_settings = get_settings()
+_RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(
+    ttl_seconds=_settings.response_cache_ttl_seconds,
+    max_size=_settings.response_cache_max_size,
+)
 logger = logging.getLogger(__name__)
-_CACHE_RESPONSE_VERSION = 5
+_CACHE_RESPONSE_VERSION = 7
 _VISUALIZATION_PIPELINE_VERSION = "geogebra-catalog-1.4-semantic-retrieval-v4-dimensions"
 
 
 class SolverService:
     def __init__(
         self,
-        db: Session,
         *,
+        result_repository: ResultRepository | None = None,
         nvidia_client: StructuredCompletionClient | None = None,
         llama_client: LlamaClient | None = None,
         router: ModelRouter | None = None,
@@ -93,7 +98,7 @@ class SolverService:
         local_solver_selector: LocalSolverSelector | None = None,
         settings: Any | None = None,
     ) -> None:
-        self.db = db
+        self.result_repository = result_repository
         self.settings = settings or get_settings()
         self._owns_nvidia_client = nvidia_client is None
         self._owns_llama_client = llama_client is None
@@ -132,6 +137,9 @@ class SolverService:
     async def solve(self, request: SolveRequest) -> SolveResponse:
         return await solve_request(self, request, _RESPONSE_CACHE)
 
+    def try_solve_exact(self, text: str) -> ExactSolveResult | None:
+        return self.local_solver_selector.try_solve_exact(text)
+
     def _with_local_solver_routing(
         self,
         routing: RoutingDecision,
@@ -152,6 +160,11 @@ class SolverService:
         self, routing: RoutingDecision, *, reason: str
     ) -> RoutingDecision:
         return with_local_subquestion_routing(routing, reason=reason)
+
+    def _with_remote_solver_routing(
+        self, routing: RoutingDecision, *, reason: str
+    ) -> RoutingDecision:
+        return with_remote_solver_routing(routing, reason=reason)
 
     def _is_supported_local_draft(self, draft: StructuredSolveDraft) -> bool:
         return is_supported_local_draft(draft)
@@ -225,6 +238,13 @@ class SolverService:
                         temperature=0.2,
                         json_schema=SOLVE_RESPONSE_JSON_SCHEMA,
                         schema_name="structured_math_solution",
+                        max_tokens=int(
+                            getattr(
+                                self.settings,
+                                "structured_solution_max_tokens",
+                                4_500,
+                            )
+                        ),
                         require_parameters=False,
                         allow_schema_downgrade=False,
                         repair_invalid_json=False,
@@ -244,6 +264,13 @@ class SolverService:
                         completion_client=candidate_client,
                         candidate=candidate,
                         timeout_seconds=attempt_timeout,
+                        max_tokens=int(
+                            getattr(
+                                self.settings,
+                                "missing_step_repair_max_tokens",
+                                2_000,
+                            )
+                        ),
                         request_id=request_id,
                     )
                     initial_issues = log_structured_step_quality(
@@ -260,6 +287,13 @@ class SolverService:
                             completion_client=candidate_client,
                             candidate=candidate,
                             timeout_seconds=attempt_timeout,
+                            max_tokens=int(
+                                getattr(
+                                    self.settings,
+                                    "content_repair_max_tokens",
+                                    2_500,
+                                )
+                            ),
                             request_id=request_id,
                         )
                     final_issues = log_structured_step_quality(
@@ -330,8 +364,8 @@ class SolverService:
                         diagnostics.response_body,
                     )
 
-            answer, steps, confidence, warnings = self.fallback_solver.solve(
-                text, problem_type, difficulty
+            answer, steps, confidence, warnings = (
+                self.fallback_solver.unsupported_result()
             )
             warnings = self._without_backend_config_warnings(warnings)
             logger.error(
@@ -341,17 +375,6 @@ class SolverService:
                 model_failures,
             )
             fallback_notice = "The preferred solver was unavailable; this result was produced by the local solver."
-            if len(subquestions) > 1:
-                draft = self._fallback_draft_for_subquestions(
-                    text=text,
-                    problem_type=problem_type,
-                    difficulty=difficulty,
-                    subquestions=subquestions,
-                    warning=fallback_notice,
-                    suppress_config_warnings=True,
-                )
-                draft.solver_model = LOCAL_DETERMINISTIC_SOLVER_MODEL
-                return draft
             warnings.append(fallback_notice)
             return StructuredSolveDraft(
                 answer,
@@ -359,36 +382,17 @@ class SolverService:
                 confidence,
                 warnings,
                 parts=[],
-                solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
+                solver_model=LOCAL_SAFE_FALLBACK_MODEL,
             )
 
-        if len(subquestions) > 1:
-            logger.warning(
-                "Multi-question solve used local fallback because model client is disabled subquestions=%s problem_type=%s difficulty=%s",
-                len(subquestions),
-                problem_type.value,
-                difficulty.value,
-            )
-            draft = self._fallback_draft_for_subquestions(
-                text=text,
-                problem_type=problem_type,
-                difficulty=difficulty,
-                subquestions=subquestions,
-                suppress_config_warnings=True,
-            )
-            draft.solver_model = LOCAL_DETERMINISTIC_SOLVER_MODEL
-            return draft
-
-        answer, steps, confidence, warnings = self.fallback_solver.solve(
-            text, problem_type, difficulty
-        )
+        answer, steps, confidence, warnings = self.fallback_solver.unsupported_result()
         return StructuredSolveDraft(
             answer,
             steps,
             confidence,
             self._without_backend_config_warnings(warnings),
             parts=[],
-            solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
+            solver_model=LOCAL_SAFE_FALLBACK_MODEL,
         )
 
     def _model_candidates(
@@ -427,6 +431,7 @@ class SolverService:
             "catalog_generator_version": registry_metadata.get("generator_version"),
             "catalog_upstream_commit": registry_metadata.get("upstream_commit"),
             "text": normalized_text,
+            "input_type": "image" if request.input.image_base64 else "text",
             "language": request.input.language,
             "options": request.options.model_dump(mode="json"),
         }

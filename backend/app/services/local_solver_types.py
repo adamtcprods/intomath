@@ -22,10 +22,3 @@ class LocalSolveResult:
     problem_type: ProblemType | None
     reason: str
     detector_model: str | None = None
-
-
-@dataclass(frozen=True)
-class LocalSolveDetection:
-    use_local_solver: bool
-    normalized_prompt: str | None
-    reason: str | None

@@ -29,7 +29,9 @@ flowchart TD
     V --> T[Deterministic GeoGebra translator]
     F --> J[Structured response assembly]
     T --> J
-    J --> K[Cache + persistence]
+    J --> K[Response cache]
+    J --> P[Result repository]
+    P --> Q[Thread-owned SQLAlchemy session]
     J --> R[Sequential applet runtime validation]
     R --> U[Frontend answer, steps, and visualization]
 ```
@@ -77,7 +79,7 @@ flowchart TD
 - `app/main.py`
   - FastAPI app setup
   - CORS middleware
-  - startup table creation
+  - shared model-client lifecycle; database schemas are managed by Alembic
 - `app/api/v1/endpoints/solve.py`
   - `POST /api/v1/solve`
 - `app/api/v1/endpoints/health.py`
@@ -86,14 +88,18 @@ flowchart TD
 ### Service layer
 
 - `solver_service.py`
-  - main orchestration layer
+  - session-free solver facade
   - OCR
   - routing
   - solving
   - visualization extraction
   - translation
-  - persistence
   - response caching
+- `repositories/result_repository.py`
+  - best-effort attempt, run, trace ID, and timing persistence
+  - creates, rolls back, and closes a synchronous session inside one worker thread
+- `alembic/`
+  - managed production database schema and revisions
 - `model_router.py`
   - schema-constrained local-AI classification of subject, difficulty, and visualization environment
   - explicit unclassified route when the model is unavailable or invalid
@@ -103,8 +109,8 @@ flowchart TD
 - `ocr_service.py`
   - image-to-structured-text stage through local DeepSeek OCR
 - `geometry_extractor.py`
-  - validated, schema-constrained DSL extraction through the local llama.cpp model for local solve routes
-  - remote model extraction for model-backed geometry routes
+  - validated, schema-constrained local llama.cpp extraction as the primary visualization parser
+  - typed NVIDIA fallback and action-scoped repair policy
   - tiny-model semantic catalog query expansion, bounded to 10 retrieved commands
   - returns no visualization when every model-backed parser fails
 - `geogebra_translator.py`
@@ -145,11 +151,28 @@ the missing classification.
 | Local semantic routing, normalization, trivia, catalog-query expansion, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
 | Easy algebra / arithmetic outside deterministic coverage | `openai/gpt-oss-20b` via NVIDIA NIM |
 | Hard geometry / proofs / multi-step reasoning | `openai/gpt-oss-120b` via NVIDIA NIM |
-| Model fallback | NVIDIA NIM order: gpt-oss-120b → gpt-oss-20b, with bounded reasoning and deterministic post-validation |
+| Structured-solve fallback | Preferred NVIDIA gpt-oss model → alternate gpt-oss model, with bounded reasoning and deterministic post-validation |
+| Geometry fallback | Healthy local llama.cpp parser → gpt-oss-20b → gpt-oss-120b, subject to typed failure policy and the request deadline |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |
 
 Structured-solve fallback order is explicit: the preferred and alternate NVIDIA NIM
-gpt-oss models. Geometry uses the same entries after the local llama safety net.
+gpt-oss models. Geometry has its own lower-latency policy: the validated local parser is
+primary when enabled, healthy, and within its supported prompt length; gpt-oss-20b is
+the preferred remote fallback and gpt-oss-120b is the alternate.
+
+Geometry fallback is driven by typed failure categories and actions:
+
+| Failure | Action |
+|---|---|
+| Local unavailable, timeout, invalid JSON/schema, or invalid DSL | Try preferred remote |
+| Remote 429, timeout, connectivity, invalid JSON/schema, or provider error | Try one alternate model if deadline remains |
+| Valid remote schema with invalid DSL | Try one action-scoped repair |
+| Failed or still-invalid repair | Try one alternate model if deadline remains |
+| Exhausted request deadline or unclassified remote failure | Stop |
+
+Each extraction keeps an internal structured attempt record with provider, model,
+operation, duration, outcome, and failure category. A provider/model/operation key
+cannot run twice, and a proposal can be repaired only once.
 
 ## GeoGebra trust boundary
 
@@ -182,8 +205,9 @@ answer tuples absent from the normalized problem statement.
 
 Remote solve and geometry requests include strict response schemas in their prompts and
 validate responses locally. Provider/schema unavailability is distinct from invalid
-model output. Geometry falls through to the constrained local parser and the explicitly
-named NVIDIA NIM models. If no model returns a valid plan, visualization stays empty. The
+model output. Geometry starts with the constrained local parser and then uses explicitly
+named NVIDIA NIM models according to the failure matrix above. If no model returns a
+valid plan, visualization stays empty. The
 published closed NVIDIA `ChatRequest` schemas for these models omit `response_format`,
 so non-streaming output is explicitly treated as an unenforced proposal. gpt-oss uses
 low reasoning effort. The same authoritative payload,

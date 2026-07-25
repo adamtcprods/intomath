@@ -117,7 +117,7 @@ def test_llama_connection_refusal_logs_root_cause_and_opens_shared_circuit(
         with caplog.at_level(logging.WARNING), pytest.raises(IntegrationRequestError):
             await first_client.generate_json(
                 prompt="Return JSON.",
-                operation="local_route_classification",
+                operation="local_unified_routing",
                 trace_id="connection-refusal-test",
             )
 
@@ -140,7 +140,7 @@ def test_llama_connection_refusal_logs_root_cause_and_opens_shared_circuit(
         for record in caplog.records
         if "Llama-server request failed" in record.getMessage()
     )
-    assert "operation=local_route_classification" in failure_log
+    assert "operation=local_unified_routing" in failure_log
     assert "Connection error" in failure_log
     assert "ConnectError: [Errno 111] Connection refused" in failure_log
     assert request_count == 1

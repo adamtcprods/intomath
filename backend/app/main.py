@@ -8,9 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import router as api_router
 from app.core.config import get_settings
-from app.db import models as _models  # noqa: F401 -- Register SQLAlchemy models.
-from app.db.base import Base
-from app.db.session import engine
 from app.dependencies import create_shared_model_clients
 
 settings = get_settings()
@@ -25,8 +22,6 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Startup: create all tables if they don't exist.
-    Base.metadata.create_all(bind=engine)
     model_clients = create_shared_model_clients(settings)
     app.state.model_clients = model_clients
     try:

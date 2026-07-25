@@ -57,18 +57,6 @@ Use `--database-url` to override `DATABASE_URL` and `--failure-report PATH` to
 export malformed artifact IDs and validation errors. The migration preserves
 stored GeoGebra commands and leaves invalid legacy DSL records unchanged.
 
-Run the API:
-
-```bash
-.venv-local/bin/uvicorn app.main:app --app-dir backend --reload
-```
-
-This starts FastAPI on:
-
-```text
-http://localhost:8000
-```
-
 ## Backend environment
 
 Create `backend/.env` with values like:
@@ -77,8 +65,23 @@ Create `backend/.env` with values like:
 APP_NAME=IntoMath API
 APP_ENV=development
 APP_DEBUG=true
+SOLVE_REQUEST_TIMEOUT_SECONDS=70.0
+MAX_SOLVE_TEXT_LENGTH=20000
+MAX_IMAGE_BASE64_LENGTH=14000000
+MAX_DECODED_IMAGE_BYTES=10485760
+MAX_IMAGE_WIDTH=8192
+MAX_IMAGE_HEIGHT=8192
+RESPONSE_CACHE_TTL_SECONDS=900
+RESPONSE_CACHE_MAX_SIZE=500
+OCR_CACHE_TTL_SECONDS=3600
+OCR_CACHE_MAX_SIZE=256
 REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0
 NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0
+STRUCTURED_SOLUTION_MAX_TOKENS=4500
+GEOMETRY_EXTRACTION_MAX_TOKENS=1200
+GEOMETRY_REPAIR_MAX_TOKENS=800
+MISSING_STEP_REPAIR_MAX_TOKENS=2000
+CONTENT_REPAIR_MAX_TOKENS=2500
 NVIDIA_API_KEY=
 NVIDIA_DIRECT_ENABLED=true
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
@@ -91,12 +94,34 @@ LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED=true
 LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
 LOCAL_SOLVER_LLAMA_MODEL=unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL
+LOCAL_ROUTER_LLAMA_MAX_TOKENS=300
 LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=20.0
 LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS=1.0
 LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS=60.0
 LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS=30.0
 LOCAL_LLAMA_GEOMETRY_MAX_TOKENS=1200
 ```
+
+`SOLVE_REQUEST_TIMEOUT_SECONDS` is the wall-clock budget for the complete solve
+pipeline, including input validation/OCR, routing, solving and repairs,
+visualization, and cache population. Best-effort result persistence runs after
+that solve budget in a worker thread. Expiration returns HTTP 504
+with a generic message; the request ID and active stage are recorded only in
+server logs. The text, Base64, decoded-byte, and image-dimension limits reject
+oversized requests with HTTP 413. Invalid Base64, unsupported or missing MIME
+types, MIME/content mismatches, and malformed images return HTTP 422. Supported
+image MIME types are `image/jpeg`, `image/png`, `image/webp`, and `image/gif`.
+
+The response and OCR caches are bounded, process-local in-memory caches.
+`*_CACHE_TTL_SECONDS` controls entry lifetime and `*_CACHE_MAX_SIZE` controls
+the maximum number of entries per process. OCR entries contain extracted text
+and metadata only; decoded image and Base64 payloads are never stored.
+
+The remote output budgets are operation-specific: 4500 tokens for a full
+structured solution, 1200 for geometry extraction, 800 for geometry repair,
+2000 for missing-step repair, and 2500 for content repair. The separate
+`LOCAL_ROUTER_LLAMA_MAX_TOKENS` and `LOCAL_LLAMA_GEOMETRY_MAX_TOKENS` controls
+remain authoritative for local llama.cpp routing and geometry extraction.
 
 ### PostgreSQL option
 
@@ -106,6 +131,66 @@ For PostgreSQL, set `DATABASE_URL` to something like:
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
 ```
 
+## Database setup and migrations
+
+Application startup does not create or modify tables. Run Alembic before
+starting a new deployment and whenever the backend is upgraded.
+
+### SQLite
+
+For local development, configure the path in `backend/.env`:
+
+```env
+DATABASE_URL=sqlite:///./intomath.db
+```
+
+From the `backend` directory, upgrade an empty or existing Alembic-managed
+database to the latest schema:
+
+```bash
+cd backend
+../.venv-local/bin/alembic upgrade head
+```
+
+SQLite creates `intomath.db` automatically if it does not exist. To inspect the
+current and available revisions:
+
+```bash
+../.venv-local/bin/alembic current
+../.venv-local/bin/alembic history
+```
+
+### PostgreSQL
+
+Create the database, set its URL, and run the same migration:
+
+```bash
+createdb intomath
+export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
+cd backend
+../.venv-local/bin/alembic upgrade head
+```
+
+For later application upgrades, deploy the new code and run
+`alembic upgrade head` before starting API workers. Back up a production
+database before migrating. Databases previously created only through
+`Base.metadata.create_all()` are not Alembic-managed; preserve any required
+data and establish an explicit baseline before deploying rather than stamping
+an unverified schema.
+
+Tests may continue to use `Base.metadata.create_all()` with an in-memory or
+temporary SQLite engine to create disposable schemas quickly. Production and
+long-lived development databases must use Alembic.
+
+Run the API from the `backend` directory so the relative SQLite URL resolves
+consistently:
+
+```bash
+../.venv-local/bin/uvicorn app.main:app --reload
+```
+
+This starts FastAPI on `http://localhost:8000`.
+
 ## Solver model configuration
 
 IntoMath expects the following model policy:
@@ -113,7 +198,8 @@ IntoMath expects the following model policy:
 - AI-selected deterministic arithmetic/algebra execution: `local:deterministic-solver`
 - easy solving via NVIDIA NIM: `openai/gpt-oss-20b`
 - hard solving via NVIDIA NIM: `openai/gpt-oss-120b`
-- NVIDIA NIM fallback order: gpt-oss-120b, gpt-oss-20b
+- structured-solve NVIDIA fallback: preferred routed gpt-oss model, then its alternate
+- geometry fallback: local llama.cpp, gpt-oss-20b, then gpt-oss-120b when the typed failure policy permits
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
 For local-first routing, normalization, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
@@ -171,22 +257,25 @@ The current code routes solver requests in `backend/app/services/solver_service.
 
 NVIDIA NIM request contracts omit `response_format`, so structured solve and geometry
 requests supply their schemas in the prompt and validate every response locally.
-Geometry goes directly to the local llama.cpp parser, then the ordered NVIDIA list.
-Invalid model output has different warnings and follows the same model-backed fallback
-chain; no regex construction parser replaces it.
+Geometry goes directly to the local llama.cpp parser when it is enabled, healthy, and
+the prompt is within 4,000 characters. Local unavailability, timeout, or invalid output
+uses gpt-oss-20b as the preferred remote fallback. Remote 429, timeout, connectivity,
+invalid JSON/schema, or a failed action-scoped repair may use gpt-oss-120b once if the
+overall request deadline permits. No regex construction parser replaces this flow.
 
 Structured solve candidates are explicit and ordered:
 
 1. `openai/gpt-oss-120b`
 2. `openai/gpt-oss-20b`
 
-Geometry uses the same two-entry NVIDIA order after its local fallback. `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
+Geometry uses gpt-oss-20b then gpt-oss-120b after its local primary parser.
+`REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
 the hard budget for ordinary remote attempts.
 `NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0` applies only to direct gpt-oss-120b
 to allow for free-tier cold starts; gpt-oss-20b remains at 25s.
-HTTP 429s are not hidden or retried inside an opaque SDK: logs include attempt number,
-model, provider, operation, request ID, status/body, and `failure_code=rate_limited`.
-Ordering should only change after those logs provide representative rate-limit data.
+HTTP 429s are not hidden or retried inside an opaque SDK. Geometry records provider,
+model, operation, duration, outcome, and typed failure category for each internal
+attempt; identical provider/model/operation attempts are suppressed.
 
 Set `NVIDIA_API_KEY` to a key from build.nvidia.com. `NVIDIA_DIRECT_ENABLED=true`
 enables remote solving when the key is present. The published

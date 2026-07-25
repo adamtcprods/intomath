@@ -11,7 +11,11 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
-from app.integrations.errors import IntegrationRequestError, exception_diagnostics
+from app.integrations.errors import (
+    IntegrationFailureCategory,
+    IntegrationRequestError,
+    exception_diagnostics,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -152,6 +156,7 @@ class LlamaClient:
                 provider="llama.cpp",
                 model=selected_model,
                 operation=operation,
+                failure_category=IntegrationFailureCategory.connectivity,
             )
 
         request_timeout = (
@@ -206,6 +211,7 @@ class LlamaClient:
                 provider="llama.cpp",
                 model=selected_model,
                 operation=operation,
+                failure_category=IntegrationFailureCategory.timeout,
             )
             diagnostics = exception_diagnostics(error)
             logger.warning(
@@ -231,6 +237,11 @@ class LlamaClient:
                 operation=operation,
                 status_code=diagnostics.status_code,
                 response_body=diagnostics.response_body,
+                failure_category=(
+                    IntegrationFailureCategory.connectivity
+                    if self._is_connectivity_failure(exc)
+                    else IntegrationFailureCategory.http_error
+                ),
             )
             logger.warning(
                 "Llama-server request failed operation=%s trace_id=%s model=%s "
@@ -249,7 +260,13 @@ class LlamaClient:
         text = response.choices[0].message.content or ""
         text = text.strip()
         if not text:
-            raise RuntimeError(f"Llama-server returned an empty response for {selected_model}.")
+            raise IntegrationRequestError(
+                f"Llama-server returned an empty response for {selected_model}.",
+                provider="llama.cpp",
+                model=selected_model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.invalid_response,
+            )
 
         # Strip reasoning tags (<think>...</think>) if they are present in the response
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -257,14 +274,22 @@ class LlamaClient:
         try:
             payload = json.loads(self._strip_json_wrappers(text))
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
+            raise IntegrationRequestError(
                 f"Llama-server returned invalid JSON for model {selected_model} "
-                f"at line {exc.lineno}, column {exc.colno}."
+                f"at line {exc.lineno}, column {exc.colno}.",
+                provider="llama.cpp",
+                model=selected_model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.invalid_response,
             ) from exc
         if not isinstance(payload, dict):
-            raise RuntimeError(
+            raise IntegrationRequestError(
                 f"Llama-server returned JSON {type(payload).__name__} for model "
-                f"{selected_model}; expected object."
+                f"{selected_model}; expected object.",
+                provider="llama.cpp",
+                model=selected_model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.invalid_response,
             )
         logger.info(
             "Llama-server request succeeded operation=%s trace_id=%s model=%s response_chars=%s",
@@ -284,17 +309,19 @@ class LlamaClient:
         temperature: float = 0.2,
         json_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
+        max_tokens: int = 500,
         timeout_seconds: float | None = None,
         operation: str = "json_completion",
         trace_id: str | None = None,
+        thinking_budget_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Adapt the shared structured-completion interface to llama-server."""
         _ = (model, temperature, schema_name)
         return await self.generate_json(
             prompt=f"{system_prompt.strip()}\n\n{user_prompt.strip()}".strip(),
-            max_tokens=kwargs.get("max_tokens"),
-            thinking_budget_tokens=kwargs.get("thinking_budget_tokens"),
+            max_tokens=max_tokens,
+            thinking_budget_tokens=thinking_budget_tokens,
             timeout_seconds=timeout_seconds,
             json_schema=json_schema,
             operation=operation,

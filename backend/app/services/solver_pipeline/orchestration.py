@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.integrations.errors import exception_diagnostics
+from app.repositories.result_repository import SolveTimings
+from app.services.model_router import (
+    LOCAL_DETERMINISTIC_SOLVER_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
+    RoutingDecision,
+    SolveRoute,
+    VISION_MODEL,
+)
 from app.schemas.solve import (
     GeoGebraPayload,
     RoutingPayload,
@@ -14,9 +26,10 @@ from app.schemas.solve import (
     SolveResponse,
     VisualizationPayload,
 )
-from app.services.cache import TTLCache
+from app.services.cache import AsyncSingleFlight, TTLCache
+from app.services.input_validation import validate_solve_input
 
-from .persistence import persist_solve_result
+from .errors import SolveRequestTimeoutError
 from .response_builder import StructuredSolveDraft
 from .subquestion import detect_subquestions
 
@@ -25,6 +38,38 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _SolveExecution:
+    request_id: str
+    stage: str = "input_validation"
+    deadline: float | None = None
+
+
+@dataclass(frozen=True)
+class _PreparedSolveInput:
+    normalized_text: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ComputedSolveResponse:
+    response: SolveResponse
+    solver_duration_ms: float
+    visualization_duration_ms: float
+
+
+@dataclass(frozen=True)
+class _SolveOutcome:
+    response: SolveResponse
+    raw_text: str
+    normalized_text: str
+    solver_duration_ms: float
+    visualization_duration_ms: float
+
+
+_RESPONSE_SINGLE_FLIGHT = AsyncSingleFlight()
 
 
 def _cached_response_is_usable(
@@ -50,8 +95,75 @@ async def solve_request(
     service: SolverService,
     request: SolveRequest,
     response_cache: TTLCache[SolveResponse],
+    single_flight: AsyncSingleFlight[_ComputedSolveResponse] | None = None,
 ) -> SolveResponse:
     request_id = str(uuid.uuid4())
+    request_started_at = datetime.now(UTC)
+    request_started = time.monotonic()
+    execution = _SolveExecution(request_id=request_id)
+    timeout_seconds = float(
+        getattr(
+            getattr(service, "settings", None),
+            "solve_request_timeout_seconds",
+            70.0,
+        )
+    )
+    execution.deadline = time.monotonic() + timeout_seconds
+    timeout_scope = asyncio.timeout(timeout_seconds)
+    try:
+        async with timeout_scope:
+            outcome = await _execute_solve_request(
+                service,
+                request,
+                response_cache,
+                single_flight or _RESPONSE_SINGLE_FLIGHT,
+                execution=execution,
+            )
+    except TimeoutError as exc:
+        if not timeout_scope.expired():
+            raise
+        logger.error(
+            "Solve request total timeout request_id=%s stage=%s timeout_seconds=%.1f",
+            request_id,
+            execution.stage,
+            timeout_seconds,
+        )
+        raise SolveRequestTimeoutError(
+            request_id=request_id,
+            stage=execution.stage,
+        ) from exc
+
+    solve_completed_at = datetime.now(UTC)
+    solve_duration_ms = (time.monotonic() - request_started) * 1000.0
+    repository = getattr(service, "result_repository", None)
+    if repository is not None:
+        execution.stage = "persistence"
+        await repository.save(
+            request,
+            outcome.raw_text,
+            outcome.normalized_text,
+            outcome.response,
+            SolveTimings(
+                request_started_at=request_started_at,
+                solve_completed_at=solve_completed_at,
+                solve_duration_ms=solve_duration_ms,
+                solver_duration_ms=outcome.solver_duration_ms,
+                visualization_duration_ms=outcome.visualization_duration_ms,
+            ),
+        )
+    execution.stage = "completed"
+    return outcome.response
+
+
+async def _execute_solve_request(
+    service: SolverService,
+    request: SolveRequest,
+    response_cache: TTLCache[SolveResponse],
+    single_flight: AsyncSingleFlight[_ComputedSolveResponse],
+    *,
+    execution: _SolveExecution,
+) -> _SolveOutcome:
+    request_id = execution.request_id
     warnings: list[str] = []
     raw_text = request.input.text.strip()
     normalized_text = raw_text
@@ -64,10 +176,21 @@ async def solve_request(
         request.options.include_visualization,
     )
 
-    ocr_result = await service.ocr_service.extract_problem_text(
-        request.input.image_base64,
-        request.input.image_mime_type,
+    execution.stage = "input_validation"
+    validated_input = validate_solve_input(
+        request.input, getattr(service, "settings", None)
     )
+    execution.stage = "ocr"
+    ocr_result = await service.ocr_service.extract_problem_text(
+        validated_input.image_bytes,
+        validated_input.image_mime_type,
+    )
+    if validated_input.image_bytes:
+        logger.info(
+            "OCR cache result request_id=%s cache=ocr result=%s",
+            request_id,
+            "hit" if bool(getattr(ocr_result, "cached", False)) else "miss",
+        )
     if ocr_result:
         logger.info(
             "OCR extraction completed request_id=%s cleaned_text_chars=%s has_warning=%s",
@@ -89,7 +212,7 @@ async def solve_request(
                 else ocr_result.cleaned_text
             )
 
-    detected_subquestions = detect_subquestions(normalized_text)
+    execution.stage = "cache_lookup"
     cache_key = service._build_cache_key(normalized_text, request)
     cached_response = response_cache.get(cache_key)
     if cached_response is not None:
@@ -103,27 +226,124 @@ async def solve_request(
                 cache_key[:12],
             )
             response_cache.delete(cache_key)
-        else:
             logger.info(
-                "Solve cache hit request_id=%s cache_key_prefix=%s",
+                "Solve cache lookup request_id=%s cache=response result=miss "
+                "cache_key_prefix=%s reason=unusable",
                 request_id,
                 cache_key[:12],
             )
-            return cached_response.model_copy(
-                update={"request_id": request_id, "cached": True}
+        else:
+            logger.info(
+                "Solve cache lookup request_id=%s cache=response result=hit "
+                "cache_key_prefix=%s",
+                request_id,
+                cache_key[:12],
             )
+            response = cached_response.model_copy(
+                update={"request_id": request_id, "cached": True},
+                deep=True,
+            )
+            return _SolveOutcome(
+                response=response,
+                raw_text=raw_text,
+                normalized_text=normalized_text,
+                solver_duration_ms=0.0,
+                visualization_duration_ms=0.0,
+            )
+    else:
+        logger.info(
+            "Solve cache lookup request_id=%s cache=response result=miss "
+            "cache_key_prefix=%s reason=not_found",
+            request_id,
+            cache_key[:12],
+        )
 
-    routing = await service.router.route_async(
-        normalized_text, has_image=bool(request.input.image_base64)
+    prepared = _PreparedSolveInput(
+        normalized_text=normalized_text,
+        warnings=tuple(warnings),
     )
+    execution.stage = "single_flight_wait"
+    computed, _is_leader = await single_flight.run(
+        cache_key,
+        lambda: _compute_solve_response(
+            service,
+            request,
+            response_cache,
+            cache_key=cache_key,
+            prepared=prepared,
+            execution=execution,
+        ),
+        on_role=lambda leader: logger.info(
+            "Solve single-flight request_id=%s cache_key_prefix=%s role=%s",
+            request_id,
+            cache_key[:12],
+            "leader" if leader else "waiter",
+        ),
+    )
+    response = computed.response.model_copy(
+        update={"request_id": request_id, "cached": False},
+        deep=True,
+    )
+    return _SolveOutcome(
+        response=response,
+        raw_text=raw_text,
+        normalized_text=normalized_text,
+        solver_duration_ms=computed.solver_duration_ms,
+        visualization_duration_ms=computed.visualization_duration_ms,
+    )
+
+
+async def _compute_solve_response(
+    service: SolverService,
+    request: SolveRequest,
+    response_cache: TTLCache[SolveResponse],
+    *,
+    cache_key: str,
+    prepared: _PreparedSolveInput,
+    execution: _SolveExecution,
+) -> _ComputedSolveResponse:
+    request_id = execution.request_id
+    normalized_text = prepared.normalized_text
+    warnings = list(prepared.warnings)
+    detected_subquestions = detect_subquestions(normalized_text)
+    solver_started = time.monotonic()
+
+    execution.stage = "exact_solver"
+    exact_solver = getattr(service, "try_solve_exact", None)
+    exact_result = (
+        exact_solver(normalized_text) if callable(exact_solver) else None
+    )
+    if exact_result is not None:
+        routing = RoutingDecision(
+            problem_type=exact_result.problem_type,
+            difficulty=exact_result.difficulty,
+            parser_model=LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
+            solver_model=LOCAL_DETERMINISTIC_SOLVER_MODEL,
+            vision_model=(
+                VISION_MODEL if bool(request.input.image_base64) else None
+            ),
+            visualization_environment=exact_result.visualization_environment,
+            reason=(
+                f"deterministic local solver used because it {exact_result.reason}"
+            ),
+            visualization_search_terms=exact_result.visualization_search_terms,
+            solve_route=SolveRoute.deterministic,
+            normalized_prompt=exact_result.normalized_prompt,
+        )
+    else:
+        execution.stage = "routing"
+        routing = await service.router.route_async(
+            normalized_text, has_image=bool(request.input.image_base64)
+        )
     logger.info(
         "Solve routing request_id=%s problem_type=%s difficulty=%s parser_model=%s "
-        "solver_model=%s vision_model=%s visualization_environment=%s",
+        "solver_model=%s solve_route=%s vision_model=%s visualization_environment=%s",
         request_id,
         routing.problem_type.value,
         routing.difficulty.value,
         routing.parser_model,
         routing.solver_model,
+        routing.solve_route.value,
         routing.vision_model,
         (
             routing.visualization_environment.value
@@ -133,35 +353,46 @@ async def solve_request(
     )
 
     solve_text = normalized_text
-    local_result = None
-    local_subquestion_draft = None
-    local_subquestion_reason = None
-    if len(detected_subquestions) <= 1:
+    local_result = (
+        exact_result.local_result if exact_result is not None else None
+    )
+    selected_solver = getattr(
+        service.local_solver_selector,
+        "solve_selected_route",
+        None,
+    )
+    if (
+        exact_result is None
+        and routing.solve_route is not SolveRoute.remote
+        and callable(selected_solver)
+    ):
+        execution.stage = "selected_local_solver"
+        local_result = await selected_solver(
+            normalized_text,
+            routing.problem_type,
+            routing.difficulty,
+            routing.solve_route,
+        )
+        if local_result is None:
+            rejected_route = routing.solve_route
+            rejection_reason = (
+                "deterministic parser rejected the original prompt; fell through "
+                "safely to remote solving"
+                if rejected_route is SolveRoute.deterministic
+                else "selected local trivia solver declined; fell through to remote solving"
+            )
+            routing = service._with_remote_solver_routing(
+                routing,
+                reason=rejection_reason,
+            )
+    elif exact_result is None and not callable(selected_solver):
+        # Compatibility for injected pre-unification selectors.
+        execution.stage = "legacy_local_solver"
         local_result = await service.local_solver_selector.solve_if_supported(
             normalized_text,
             routing.problem_type,
             routing.difficulty,
         )
-    else:
-        candidate_local_subquestion_draft = service._fallback_draft_for_subquestions(
-            text=normalized_text,
-            problem_type=routing.problem_type,
-            difficulty=routing.difficulty,
-            subquestions=detected_subquestions,
-        )
-        if service._is_supported_local_draft(candidate_local_subquestion_draft):
-            local_subquestion_draft = candidate_local_subquestion_draft
-            local_subquestion_reason = (
-                "matched deterministic local solver patterns for every subquestion"
-            )
-        elif not service.nvidia_client.enabled:
-            logger.warning(
-                "Multi-question solve used local fallback because all model clients are disabled request_id=%s subquestions=%s",
-                request_id,
-                len(detected_subquestions),
-            )
-            local_subquestion_draft = candidate_local_subquestion_draft
-            local_subquestion_reason = "was the only available solver"
 
     if local_result is not None:
         logger.info(
@@ -177,21 +408,12 @@ async def solve_request(
             parts=[],
         )
         solve_text = local_result.normalized_text
-        routing = service._with_local_solver_routing(
-            routing, local_result, original_text=normalized_text
-        )
-    elif local_subquestion_draft is not None:
-        logger.info(
-            "Using local subquestion draft request_id=%s subquestions=%s",
-            request_id,
-            len(detected_subquestions),
-        )
-        draft = local_subquestion_draft
-        if local_subquestion_reason:
-            routing = service._with_local_subquestion_routing(
-                routing, reason=local_subquestion_reason
+        if exact_result is None:
+            routing = service._with_local_solver_routing(
+                routing, local_result, original_text=normalized_text
             )
     else:
+        execution.stage = "structured_solution"
         logger.info(
             "Using structured model solve request_id=%s model=%s subquestions=%s",
             request_id,
@@ -211,7 +433,9 @@ async def solve_request(
                 routing, solver_model=draft.solver_model
             )
     warnings.extend(draft.warnings)
+    solver_duration_ms = (time.monotonic() - solver_started) * 1000.0
 
+    visualization_started = time.monotonic()
     visualization = VisualizationPayload(
         kind="none", summary=None, dsl=None, geogebra=None
     )
@@ -232,6 +456,7 @@ async def solve_request(
     if request.options.include_visualization and visualization_environment is not None:
         visualization_stage = "extraction"
         try:
+            execution.stage = "visualization_extraction"
             logger.info(
                 "Visualization extraction started request_id=%s problem_type=%s parser_model=%s",
                 request_id,
@@ -244,6 +469,7 @@ async def solve_request(
                 environment=visualization_environment,
                 semantic_query_terms=routing.visualization_search_terms,
                 request_id=request_id,
+                request_deadline=execution.deadline,
             )
             if extraction.warnings:
                 logger.warning(
@@ -254,6 +480,7 @@ async def solve_request(
             warnings.extend(extraction.warnings)
             if extraction.dsl.actions:
                 visualization_stage = "translation"
+                execution.stage = "visualization_translation"
                 translation = service.translator.translate(
                     extraction.dsl,
                     allowed_command_names=extraction.allowed_commands,
@@ -324,7 +551,9 @@ async def solve_request(
             "visualization_environment=none reason=model_router_selected_none",
             request_id,
         )
+    visualization_duration_ms = (time.monotonic() - visualization_started) * 1000.0
 
+    execution.stage = "response_building"
     public_warnings = service._without_backend_config_warnings(warnings)
     if len(public_warnings) != len(warnings):
         logger.info(
@@ -370,9 +599,7 @@ async def solve_request(
         response.cached,
     )
 
-    persist_solve_result(
-        service.db, request, raw_text, normalized_text, routing, response
-    )
+    execution.stage = "cache_write"
     if not _cached_response_is_usable(request, solve_text, response):
         logger.info(
             "Solve response not cached request_id=%s reason=visualizable_prompt_missing_visualization",
@@ -380,7 +607,12 @@ async def solve_request(
         )
     else:
         response_cache.set(cache_key, response)
-    return response
+    execution.stage = "completed"
+    return _ComputedSolveResponse(
+        response=response,
+        solver_duration_ms=solver_duration_ms,
+        visualization_duration_ms=visualization_duration_ms,
+    )
 
 
-__all__ = ["solve_request"]
+__all__ = ["SolveRequestTimeoutError", "solve_request"]

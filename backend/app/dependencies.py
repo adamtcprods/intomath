@@ -6,12 +6,12 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import Depends, Request
-from sqlalchemy.orm import Session
+from fastapi import Request
 
-from app.db.session import get_db
+from app.db.session import SessionLocal
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
+from app.repositories.result_repository import ResultRepository
 from app.services.solver_service import SolverService
 
 
@@ -44,12 +44,11 @@ def create_shared_model_clients(settings: Any) -> SharedModelClients:
 
 def get_solver_service(
     request: Request,
-    db: Session = Depends(get_db),
 ) -> SolverService:
-    """Combine shared model clients with this request's database session."""
+    """Combine shared model clients with stateless persistence dependencies."""
     clients: SharedModelClients = request.app.state.model_clients
     return SolverService(
-        db,
+        result_repository=ResultRepository(SessionLocal),
         nvidia_client=clients.nvidia,
         llama_client=clients.llama,
     )

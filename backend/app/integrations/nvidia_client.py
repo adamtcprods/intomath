@@ -10,6 +10,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.integrations.errors import (
+    IntegrationFailureCategory,
     IntegrationRequestError,
     compact_log_text,
     exception_diagnostics,
@@ -71,6 +72,7 @@ class NvidiaClient:
         temperature: float = 0.2,
         json_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
+        max_tokens: int = 500,
         timeout_seconds: float | None = None,
         operation: str = "json_completion",
         trace_id: str | None = None,
@@ -106,7 +108,7 @@ class NvidiaClient:
             ],
             "temperature": temperature,
             "top_p": 0.95,
-            "max_tokens": 6_000,
+            "max_tokens": max_tokens,
             "stream": False,
         }
         if model in NVIDIA_GPT_OSS_MODELS:
@@ -119,12 +121,13 @@ class NvidiaClient:
             reasoning_controls = "enable_thinking=false reasoning_budget=64"
         logger.info(
             "NVIDIA direct request started operation=%s trace_id=%s model=%s "
-            "schema_name=%s timeout_seconds=%.1f stream=false %s "
+            "schema_name=%s max_tokens=%s timeout_seconds=%.1f stream=false %s "
             "response_format_type=None structured_output_enforced=false",
             operation,
             trace_id,
             model,
             schema_name,
+            max_tokens,
             request_timeout,
             reasoning_controls,
         )
@@ -157,6 +160,7 @@ class NvidiaClient:
                 provider="NVIDIA",
                 model=model,
                 operation=operation,
+                failure_category=IntegrationFailureCategory.timeout,
             )
             diagnostics = exception_diagnostics(error)
             logger.warning(
@@ -181,6 +185,7 @@ class NvidiaClient:
                 operation=operation,
                 status_code=diagnostics.status_code,
                 response_body=diagnostics.response_body,
+                failure_category=IntegrationFailureCategory.connectivity,
             )
             logger.warning(
                 "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
@@ -213,6 +218,11 @@ class NvidiaClient:
                 operation=operation,
                 status_code=response.status_code,
                 response_body=response.text,
+                failure_category=(
+                    IntegrationFailureCategory.rate_limit
+                    if response.status_code == 429
+                    else IntegrationFailureCategory.http_error
+                ),
             )
         try:
             data = response.json()
@@ -224,10 +234,11 @@ class NvidiaClient:
                 operation=operation,
                 status_code=response.status_code,
                 response_body=response.text,
+                failure_category=IntegrationFailureCategory.invalid_response,
             ) from exc
 
-        text = self._extract_response_text(data, model=model)
         try:
+            text = self._extract_response_text(data, model=model)
             result = self._loads_json_response(
                 text,
                 model=model,
@@ -246,7 +257,13 @@ class NvidiaClient:
                 diagnostics.status_code,
                 diagnostics.response_body,
             )
-            raise
+            raise IntegrationRequestError(
+                f"NVIDIA direct returned invalid JSON for model {model}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.invalid_response,
+            ) from exc
         logger.info(
             "NVIDIA direct completion metadata operation=%s trace_id=%s "
             "requested_model=%s response_model=%s provider=NVIDIA response_chars=%s "

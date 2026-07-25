@@ -34,6 +34,7 @@ async def repair_missing_structured_steps(
     completion_client: StructuredCompletionClient,
     candidate: StructuredModelEndpoint,
     timeout_seconds: float,
+    max_tokens: int = 2_000,
     request_id: str | None,
 ) -> dict[str, Any]:
     warnings = payload.get("warnings", [])
@@ -64,6 +65,7 @@ async def repair_missing_structured_steps(
             temperature=0.1,
             json_schema=SOLVE_STEPS_REPAIR_JSON_SCHEMA,
             schema_name="structured_math_steps_repair",
+            max_tokens=max_tokens,
             require_parameters=False,
             allow_schema_downgrade=False,
             repair_invalid_json=False,
@@ -166,6 +168,7 @@ async def repair_structured_content(
     completion_client: StructuredCompletionClient,
     candidate: StructuredModelEndpoint,
     timeout_seconds: float,
+    max_tokens: int = 2_500,
     request_id: str | None,
 ) -> dict[str, Any]:
     scratch_issues = [issue for issue in issues if issue.code == "scratch_work_style"]
@@ -197,6 +200,7 @@ async def repair_structured_content(
             temperature=0.1,
             json_schema=SOLVE_RESPONSE_JSON_SCHEMA,
             schema_name="structured_math_solution_repair",
+            max_tokens=max_tokens,
             require_parameters=False,
             allow_schema_downgrade=False,
             repair_invalid_json=False,

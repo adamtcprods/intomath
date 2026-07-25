@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
+from app.core.config import get_settings
 from app.integrations.local_deepseek_ocr import LocalDeepSeekOCR
+from app.services.cache import TTLCache
+
+logger = logging.getLogger(__name__)
+_OCR_CACHE_VERSION = 1
+_OCR_OPTIONS = {
+    "as_markdown": False,
+    "prompt": "free_ocr",
+    "base_size": 1024,
+    "image_size": 768,
+    "crop_mode": True,
+}
+
+_settings = get_settings()
+_OCR_CACHE: TTLCache["OCRResult"] = TTLCache(
+    ttl_seconds=_settings.ocr_cache_ttl_seconds,
+    max_size=_settings.ocr_cache_max_size,
+)
 
 
 @dataclass
@@ -12,22 +34,46 @@ class OCRResult:
     cleaned_text: str
     confidence: float
     warning: str | None = None
+    cached: bool = False
 
 
 class OCRService:
-    def __init__(self) -> None:
-        self.local_ocr = LocalDeepSeekOCR()
+    def __init__(
+        self,
+        *,
+        local_ocr: Any | None = None,
+        cache: TTLCache[OCRResult] | None = None,
+    ) -> None:
+        self.local_ocr = local_ocr or LocalDeepSeekOCR()
+        self.cache = cache if cache is not None else _OCR_CACHE
 
     async def extract_problem_text(
-        self, image_base64: str | None, mime_type: str | None
+        self, image_bytes: bytes | None, mime_type: str | None
     ) -> OCRResult | None:
-        if not image_base64:
+        if not image_bytes:
             return None
 
+        normalized_mime_type = (
+            (mime_type or "image/png").split(";", 1)[0].strip().lower()
+        )
+        cache_key = self._build_cache_key(image_bytes, normalized_mime_type)
+        cached_result = self.cache.get(cache_key)
+        if cached_result is not None:
+            logger.info(
+                "OCR cache lookup cache=ocr result=hit cache_key_prefix=%s",
+                cache_key[:12],
+            )
+            return replace(cached_result, cached=True)
+
+        logger.info(
+            "OCR cache lookup cache=ocr result=miss cache_key_prefix=%s",
+            cache_key[:12],
+        )
         try:
             raw_text = await self.local_ocr.extract_text(
-                image_base64=image_base64,
-                mime_type=mime_type or "image/png",
+                image_bytes=image_bytes,
+                mime_type=normalized_mime_type,
+                as_markdown=False,
             )
         except Exception as exc:
             return OCRResult(
@@ -45,11 +91,25 @@ class OCRService:
         cleaned_text = _clean_for_solver(raw_text)
         confidence = _estimate_confidence(raw_text)
 
-        return OCRResult(
+        result = OCRResult(
             raw_text=raw_text,
             cleaned_text=cleaned_text,
             confidence=confidence,
         )
+        self.cache.set(cache_key, result)
+        return result
+
+    def _build_cache_key(self, image_bytes: bytes, mime_type: str) -> str:
+        payload = {
+            "cache_version": _OCR_CACHE_VERSION,
+            "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
+            "mime_type": mime_type,
+            "model": self.local_ocr.model_id,
+            "options": _OCR_OPTIONS,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
 
 # ---------------------------------------------------------------------------

@@ -110,12 +110,17 @@ class FallbackSolver:
                 warnings,
             )
 
-        warnings.extend(
-            [
-                "This prompt is outside the local deterministic solver.",
-                "Configure NVIDIA_API_KEY for full model-backed solving.",
-            ]
-        )
+        return self.unsupported_result()
+
+    def unsupported_result(
+        self,
+    ) -> tuple[SolveAnswer, list[SolveStep], float, list[str]]:
+        """Return a safe non-answer without attempting any deterministic grammar."""
+
+        warnings = [
+            "This prompt is outside the local deterministic solver.",
+            "Configure NVIDIA_API_KEY for full model-backed solving.",
+        ]
         answer = SolveAnswer(
             text="I could not produce a complete solution with the local solver for this prompt. Try a typed arithmetic expression, a linear equation like 2(x + 3) = 14 or x/2 + 3 = 7, a quadratic graph like y = x^2 - 4x + 3, or use the model solver for broader coverage.",
             latex=None,

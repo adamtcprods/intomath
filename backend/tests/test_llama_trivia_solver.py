@@ -237,8 +237,7 @@ def test_selector_skips_trivia_solver_when_feature_disabled() -> None:
     assert trivia_client.calls == 0
 
 
-def test_selector_does_not_pattern_match_when_selection_ai_is_disabled() -> None:
-    """Computational prompts fall through without AI tool selection."""
+def test_selector_exact_path_does_not_need_selection_ai() -> None:
     trivia_client = FakeLlamaClient(GOOD_TRIVIA_PAYLOAD)
     trivia_solver = LlamaTriviaSolver(llama_client=trivia_client)  # type: ignore[arg-type]
 
@@ -256,5 +255,6 @@ def test_selector_does_not_pattern_match_when_selection_ai_is_disabled() -> None
         )
     )
 
-    assert result is None
+    assert result is not None
+    assert result.answer.latex == "x = 6"
     assert trivia_client.calls == 0

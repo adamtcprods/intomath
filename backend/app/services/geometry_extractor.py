@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass, field
+from enum import Enum
 from itertools import combinations
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from app.core.config import get_settings
-from app.integrations.errors import exception_diagnostics
+from app.integrations.errors import (
+    IntegrationFailureCategory,
+    exception_diagnostics,
+)
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
 from app.schemas.geometry_dsl import (
@@ -32,21 +39,23 @@ from app.services.geogebra_command_registry import (
 from app.services.geogebra_validator import GeoGebraDSLValidator
 from app.services.model_router import (
     NVIDIA_DIRECT_FALLBACK_MODELS,
+    NVIDIA_GPT_OSS_20B_MODEL,
     remote_model_timeout_seconds,
 )
 
 
 logger = logging.getLogger(__name__)
 GEOMETRY_RETRIEVAL_LIMIT = 10
+LOCAL_GEOMETRY_MAX_PROMPT_CHARS = 4_000
 
 
 def _ordered_geometry_fallback_models(parser_model: str) -> tuple[str, ...]:
-    """Retry the routed NVIDIA model before trying its alternate."""
+    """Return each eligible NVIDIA model once, preferred model first."""
 
     preferred = (
         (parser_model,)
         if parser_model in NVIDIA_DIRECT_FALLBACK_MODELS
-        else ()
+        else (NVIDIA_GPT_OSS_20B_MODEL,)
     )
     return tuple(dict.fromkeys((*preferred, *NVIDIA_DIRECT_FALLBACK_MODELS)))
 
@@ -554,8 +563,136 @@ def geometry_repair_schema(
     }
 
 
+class GeometryProvider(str, Enum):
+    local_llama = "llama.cpp"
+    nvidia = "NVIDIA"
+
+
+class GeometryOperation(str, Enum):
+    extraction = "geometry_extraction"
+    repair = "geometry_repair"
+
+
+class GeometryAttemptOutcome(str, Enum):
+    succeeded = "succeeded"
+    failed = "failed"
+    skipped = "skipped"
+
+
+class GeometryFailureCategory(str, Enum):
+    local_unavailable = "local_unavailable"
+    timeout = "timeout"
+    connectivity = "connectivity"
+    rate_limit = "rate_limit"
+    invalid_json = "invalid_json"
+    invalid_schema = "invalid_schema"
+    invalid_dsl = "invalid_dsl"
+    provider_error = "provider_error"
+    deadline_exceeded = "deadline_exceeded"
+    unknown = "unknown"
+
+
+class GeometryFailureAction(str, Enum):
+    preferred_remote = "preferred_remote"
+    alternate_remote = "alternate_remote"
+    repair_once = "repair_once"
+    stop = "stop"
+
+
+GEOMETRY_FAILURE_ACTIONS: dict[
+    tuple[GeometryProvider, GeometryFailureCategory], GeometryFailureAction
+] = {
+    **{
+        (GeometryProvider.local_llama, category): GeometryFailureAction.preferred_remote
+        for category in (
+            GeometryFailureCategory.local_unavailable,
+            GeometryFailureCategory.timeout,
+            GeometryFailureCategory.connectivity,
+            GeometryFailureCategory.invalid_json,
+            GeometryFailureCategory.invalid_schema,
+            GeometryFailureCategory.invalid_dsl,
+            GeometryFailureCategory.provider_error,
+            GeometryFailureCategory.unknown,
+        )
+    },
+    **{
+        (GeometryProvider.nvidia, category): GeometryFailureAction.alternate_remote
+        for category in (
+            GeometryFailureCategory.rate_limit,
+            GeometryFailureCategory.timeout,
+            GeometryFailureCategory.connectivity,
+            GeometryFailureCategory.invalid_json,
+            GeometryFailureCategory.invalid_schema,
+            GeometryFailureCategory.provider_error,
+        )
+    },
+    (
+        GeometryProvider.nvidia,
+        GeometryFailureCategory.invalid_dsl,
+    ): GeometryFailureAction.repair_once,
+    (
+        GeometryProvider.local_llama,
+        GeometryFailureCategory.deadline_exceeded,
+    ): GeometryFailureAction.stop,
+    (
+        GeometryProvider.nvidia,
+        GeometryFailureCategory.deadline_exceeded,
+    ): GeometryFailureAction.stop,
+    (
+        GeometryProvider.nvidia,
+        GeometryFailureCategory.unknown,
+    ): GeometryFailureAction.stop,
+}
+
+
+@dataclass(frozen=True)
+class GeometryAttemptRecord:
+    provider: GeometryProvider
+    model: str
+    operation: GeometryOperation
+    duration_seconds: float
+    outcome: GeometryAttemptOutcome
+    failure_category: GeometryFailureCategory | None = None
+
+
+@dataclass(frozen=True)
+class _GeometryAttemptKey:
+    provider: GeometryProvider
+    model: str
+    operation: GeometryOperation
+
+
+@dataclass
+class _GeometryExecution:
+    deadline: float
+    attempts: list[GeometryAttemptRecord] = field(default_factory=list)
+    attempted_keys: set[_GeometryAttemptKey] = field(default_factory=set)
+    repaired_proposals: set[tuple[GeometryProvider, str]] = field(
+        default_factory=set
+    )
+
+
+@dataclass(frozen=True)
+class _GeometryFailure:
+    category: GeometryFailureCategory
+    error: Exception
+
+
 class GeometryProposalValidationError(ValueError):
-    failure_code = "model_validation_failure"
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: GeometryFailureCategory,
+        dsl: GeometryDSL | None = None,
+        summary: str | None = None,
+        issues: tuple[GeoGebraValidationIssue, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.failure_category = category
+        self.dsl = dsl
+        self.summary = summary
+        self.issues = issues
 
 
 _SAFE_LABEL = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
@@ -657,6 +794,7 @@ class GeometryExtractionResult:
     warnings: list[str]
     allowed_commands: frozenset[str] = field(default_factory=frozenset)
     retrieved_commands: tuple[RetrievedCommand, ...] = ()
+    attempts: tuple[GeometryAttemptRecord, ...] = ()
 
 
 class GeometryExtractor:
@@ -683,101 +821,102 @@ class GeometryExtractor:
         environment: VisualizationEnvironment,
         semantic_query_terms: tuple[str, ...] = (),
         request_id: str | None = None,
+        request_deadline: float | None = None,
     ) -> GeometryExtractionResult:
         retrieved = self._retrieve_commands(
             text,
             environment,
             semantic_query_terms=semantic_query_terms,
         )
-        if parser_model.startswith("local:"):
-            if self._local_geometry_parser_enabled() and len(text.strip()) <= 4_000:
-                try:
-                    return await self._extract_with_local_llama(
-                        text, environment, retrieved, request_id=request_id
-                    )
-                except ValueError:
-                    return self._empty_extraction(
-                        environment,
-                        retrieved,
-                        "The local visualization model produced an invalid plan; "
-                        "no visualization was generated.",
-                    )
-                except Exception as exc:
-                    diagnostics = exception_diagnostics(exc)
-                    logger.warning(
-                        "Local geometry extraction failed request_id=%s model=%s "
-                        "error_type=%s error_message=%s status_code=%s response_body=%s",
-                        request_id,
-                        getattr(self.llama_client, "model", None),
-                        diagnostics.error_type,
-                        diagnostics.error_message,
-                        diagnostics.status_code,
-                        diagnostics.response_body,
-                    )
+        execution = self._new_execution(request_deadline)
+        local_model = str(
+            getattr(self.llama_client, "model", "local:llama-geometry-parser")
+        )
+        local_eligible = (
+            self._local_geometry_parser_enabled()
+            and len(text.strip()) <= LOCAL_GEOMETRY_MAX_PROMPT_CHARS
+        )
+
+        if local_eligible:
+            local_result, local_failure = await self._attempt_extraction(
+                execution,
+                provider=GeometryProvider.local_llama,
+                model=local_model,
+                text=text,
+                environment=environment,
+                retrieved=retrieved,
+                request_id=request_id,
+            )
+            if local_result is not None:
+                return self._finish_extraction(local_result, execution)
+        else:
+            local_failure = self._record_skipped_local(execution, local_model)
+
+        if (
+            self._failure_action(
+                GeometryProvider.local_llama, local_failure.category
+            )
+            is not GeometryFailureAction.preferred_remote
+            or not getattr(self.nvidia_client, "enabled", False)
+        ):
             return self._empty_extraction(
                 environment,
                 retrieved,
-                "The local visualization model was unavailable; no visualization "
-                "was generated.",
+                self._failure_warning(local_failure.category),
+                attempts=tuple(execution.attempts),
             )
 
-        if self.nvidia_client.enabled:
-            try:
-                return await self._extract_with_llm(
-                    text,
-                    parser_model,
-                    environment,
-                    retrieved,
-                    request_id=request_id,
-                    completion_client=self.nvidia_client,
-                    provider_name="NVIDIA",
-                )
-            except Exception as exc:
-                failure_code = self._remote_failure_code(exc)
-                diagnostics = exception_diagnostics(exc)
-                logger.warning(
-                    "Remote geometry extraction failed request_id=%s model=%s "
-                    "environment=%s failure_code=%s error_type=%s error_message=%s "
-                    "status_code=%s response_body=%s",
-                    request_id,
-                    parser_model,
-                    environment.value,
-                    failure_code,
-                    diagnostics.error_type,
-                    diagnostics.error_message,
-                    diagnostics.status_code,
-                    diagnostics.response_body,
-                )
-                return await self._fallback_after_remote_failure(
-                    text,
-                    environment,
-                    retrieved,
-                    request_id=request_id,
-                    parser_model=parser_model,
-                    failure_code=failure_code,
-                )
-
-        if self._local_geometry_parser_enabled():
-            logger.info(
-                "NVIDIA geometry primary skipped request_id=%s model=%s "
-                "reason=disabled_or_key_missing",
-                request_id,
-                parser_model,
-            )
-            return await self._fallback_after_remote_failure(
-                text,
-                environment,
-                retrieved,
+        for remote_model in _ordered_geometry_fallback_models(parser_model):
+            remote_result, remote_failure = await self._attempt_extraction(
+                execution,
+                provider=GeometryProvider.nvidia,
+                model=remote_model,
+                text=text,
+                environment=environment,
+                retrieved=retrieved,
                 request_id=request_id,
-                parser_model=parser_model,
-                failure_code="remote_request_failure",
             )
+            if remote_result is not None:
+                remote_result.warnings.insert(
+                    0, self._fallback_success_warning(local_failure.category)
+                )
+                return self._finish_extraction(remote_result, execution)
 
+            action = self._fallback_after_remote_failure(remote_failure.category)
+            if action is GeometryFailureAction.repair_once:
+                repaired_result, _ = await self._attempt_repair(
+                    execution,
+                    model=remote_model,
+                    proposal_error=remote_failure.error,
+                    text=text,
+                    environment=environment,
+                    retrieved=retrieved,
+                    request_id=request_id,
+                )
+                if repaired_result is not None:
+                    repaired_result.warnings.insert(
+                        0, self._fallback_success_warning(local_failure.category)
+                    )
+                    return self._finish_extraction(repaired_result, execution)
+                action = GeometryFailureAction.alternate_remote
+
+            if (
+                action is not GeometryFailureAction.alternate_remote
+                or self._remaining_seconds(execution) <= 0
+            ):
+                break
+
+        final_failure = (
+            execution.attempts[-1].failure_category
+            if execution.attempts
+            and execution.attempts[-1].failure_category is not None
+            else local_failure.category
+        )
         return self._empty_extraction(
             environment,
             retrieved,
-            "No model-backed visualization parser was available; no visualization "
-            "was generated.",
+            self._failure_warning(final_failure),
+            attempts=tuple(execution.attempts),
         )
 
     @staticmethod
@@ -785,6 +924,8 @@ class GeometryExtractor:
         environment: VisualizationEnvironment,
         retrieved: tuple[RetrievedCommand, ...],
         warning: str,
+        *,
+        attempts: tuple[GeometryAttemptRecord, ...] = (),
     ) -> GeometryExtractionResult:
         return GeometryExtractionResult(
             dsl=GeometryDSL(
@@ -802,6 +943,7 @@ class GeometryExtractor:
             warnings=[warning],
             allowed_commands=frozenset(command.name for command in retrieved),
             retrieved_commands=retrieved,
+            attempts=attempts,
         )
 
     def _local_geometry_parser_enabled(self) -> bool:
@@ -809,6 +951,398 @@ class GeometryExtractor:
             getattr(self.settings, "local_llama_geometry_extraction_enabled", False)
             and getattr(self.llama_client, "enabled", False)
             and getattr(self.llama_client, "available", True)
+        )
+
+    def _new_execution(self, request_deadline: float | None) -> _GeometryExecution:
+        deadline = (
+            request_deadline
+            if request_deadline is not None
+            else time.monotonic()
+            + float(getattr(self.settings, "solve_request_timeout_seconds", 70.0))
+        )
+        return _GeometryExecution(deadline=deadline)
+
+    @staticmethod
+    def _remaining_seconds(execution: _GeometryExecution) -> float:
+        return max(0.0, execution.deadline - time.monotonic())
+
+    @staticmethod
+    def _finish_extraction(
+        result: GeometryExtractionResult, execution: _GeometryExecution
+    ) -> GeometryExtractionResult:
+        result.attempts = tuple(execution.attempts)
+        return result
+
+    @staticmethod
+    def _failure_action(
+        provider: GeometryProvider, category: GeometryFailureCategory
+    ) -> GeometryFailureAction:
+        return GEOMETRY_FAILURE_ACTIONS.get(
+            (provider, category), GeometryFailureAction.stop
+        )
+
+    def _record_skipped_local(
+        self, execution: _GeometryExecution, model: str
+    ) -> _GeometryFailure:
+        key = _GeometryAttemptKey(
+            GeometryProvider.local_llama,
+            model,
+            GeometryOperation.extraction,
+        )
+        execution.attempted_keys.add(key)
+        failure = _GeometryFailure(
+            GeometryFailureCategory.local_unavailable,
+            RuntimeError("The validated local geometry parser is unavailable."),
+        )
+        execution.attempts.append(
+            GeometryAttemptRecord(
+                provider=key.provider,
+                model=key.model,
+                operation=key.operation,
+                duration_seconds=0.0,
+                outcome=GeometryAttemptOutcome.skipped,
+                failure_category=failure.category,
+            )
+        )
+        return failure
+
+    async def _attempt_extraction(
+        self,
+        execution: _GeometryExecution,
+        *,
+        provider: GeometryProvider,
+        model: str,
+        text: str,
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+        request_id: str | None,
+    ) -> tuple[GeometryExtractionResult | None, _GeometryFailure]:
+        key = _GeometryAttemptKey(provider, model, GeometryOperation.extraction)
+        if key in execution.attempted_keys:
+            return None, _GeometryFailure(
+                GeometryFailureCategory.unknown,
+                RuntimeError("Duplicate geometry attempt was suppressed."),
+            )
+        execution.attempted_keys.add(key)
+
+        remaining = self._remaining_seconds(execution)
+        if remaining <= 0:
+            failure = _GeometryFailure(
+                GeometryFailureCategory.deadline_exceeded,
+                TimeoutError("The geometry extraction deadline was exhausted."),
+            )
+            execution.attempts.append(
+                GeometryAttemptRecord(
+                    provider=provider,
+                    model=model,
+                    operation=key.operation,
+                    duration_seconds=0.0,
+                    outcome=GeometryAttemptOutcome.skipped,
+                    failure_category=failure.category,
+                )
+            )
+            return None, failure
+
+        configured_timeout = (
+            float(
+                getattr(
+                    self.settings, "local_llama_geometry_timeout_seconds", 30.0
+                )
+            )
+            if provider is GeometryProvider.local_llama
+            else remote_model_timeout_seconds(
+                self.settings, provider="nvidia_direct", model=model
+            )
+        )
+        timeout_seconds = min(configured_timeout, remaining)
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                if provider is GeometryProvider.local_llama:
+                    result = await self._extract_with_local_llama(
+                        text,
+                        environment,
+                        retrieved,
+                        request_id=request_id,
+                        timeout_seconds=timeout_seconds,
+                    )
+                else:
+                    result = await self._extract_with_llm(
+                        text,
+                        model,
+                        environment,
+                        retrieved,
+                        request_id=request_id,
+                        completion_client=self.nvidia_client,
+                        provider_name=provider.value,
+                        timeout_seconds=timeout_seconds,
+                    )
+        except Exception as exc:
+            category = self._failure_category(exc)
+            if (
+                category is GeometryFailureCategory.timeout
+                and self._remaining_seconds(execution) <= 0
+            ):
+                category = GeometryFailureCategory.deadline_exceeded
+            failure = _GeometryFailure(category, exc)
+            execution.attempts.append(
+                GeometryAttemptRecord(
+                    provider=provider,
+                    model=model,
+                    operation=key.operation,
+                    duration_seconds=time.monotonic() - started,
+                    outcome=GeometryAttemptOutcome.failed,
+                    failure_category=category,
+                )
+            )
+            self._log_attempt_failure(
+                request_id=request_id,
+                environment=environment,
+                provider=provider,
+                model=model,
+                operation=key.operation,
+                category=category,
+                error=exc,
+            )
+            return None, failure
+
+        execution.attempts.append(
+            GeometryAttemptRecord(
+                provider=provider,
+                model=model,
+                operation=key.operation,
+                duration_seconds=time.monotonic() - started,
+                outcome=GeometryAttemptOutcome.succeeded,
+            )
+        )
+        return result, _GeometryFailure(
+            GeometryFailureCategory.unknown,
+            RuntimeError("No failure."),
+        )
+
+    async def _attempt_repair(
+        self,
+        execution: _GeometryExecution,
+        *,
+        model: str,
+        proposal_error: Exception,
+        text: str,
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+        request_id: str | None,
+    ) -> tuple[GeometryExtractionResult | None, _GeometryFailure]:
+        proposal_key = (GeometryProvider.nvidia, model)
+        key = _GeometryAttemptKey(
+            GeometryProvider.nvidia, model, GeometryOperation.repair
+        )
+        if (
+            proposal_key in execution.repaired_proposals
+            or key in execution.attempted_keys
+            or not isinstance(proposal_error, GeometryProposalValidationError)
+            or proposal_error.dsl is None
+            or not proposal_error.issues
+        ):
+            return None, _GeometryFailure(
+                GeometryFailureCategory.invalid_dsl,
+                RuntimeError("The proposal was not eligible for action-scoped repair."),
+            )
+
+        execution.repaired_proposals.add(proposal_key)
+        execution.attempted_keys.add(key)
+        remaining = self._remaining_seconds(execution)
+        if remaining <= 0:
+            failure = _GeometryFailure(
+                GeometryFailureCategory.deadline_exceeded,
+                TimeoutError("The geometry repair deadline was exhausted."),
+            )
+            execution.attempts.append(
+                GeometryAttemptRecord(
+                    provider=key.provider,
+                    model=key.model,
+                    operation=key.operation,
+                    duration_seconds=0.0,
+                    outcome=GeometryAttemptOutcome.skipped,
+                    failure_category=failure.category,
+                )
+            )
+            return None, failure
+
+        timeout_seconds = min(
+            remote_model_timeout_seconds(
+                self.settings, provider="nvidia_direct", model=model
+            ),
+            remaining,
+        )
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                repaired_dsl = await self._repair_remote_dsl(
+                    proposal_error.dsl,
+                    proposal_error.issues,
+                    parser_model=model,
+                    environment=environment,
+                    retrieved=retrieved,
+                    request_id=request_id,
+                    completion_client=self.nvidia_client,
+                    provider_name=GeometryProvider.nvidia.value,
+                    timeout_seconds=timeout_seconds,
+                )
+                result = self._validated_remote_result(
+                    text,
+                    repaired_dsl,
+                    summary=proposal_error.summary or "",
+                    environment=environment,
+                    retrieved=retrieved,
+                    source=GeometryProvider.nvidia.value,
+                )
+        except Exception as exc:
+            category = self._failure_category(exc)
+            if (
+                category is GeometryFailureCategory.timeout
+                and self._remaining_seconds(execution) <= 0
+            ):
+                category = GeometryFailureCategory.deadline_exceeded
+            failure = _GeometryFailure(category, exc)
+            execution.attempts.append(
+                GeometryAttemptRecord(
+                    provider=key.provider,
+                    model=key.model,
+                    operation=key.operation,
+                    duration_seconds=time.monotonic() - started,
+                    outcome=GeometryAttemptOutcome.failed,
+                    failure_category=category,
+                )
+            )
+            self._log_attempt_failure(
+                request_id=request_id,
+                environment=environment,
+                provider=key.provider,
+                model=key.model,
+                operation=key.operation,
+                category=category,
+                error=exc,
+            )
+            return None, failure
+
+        execution.attempts.append(
+            GeometryAttemptRecord(
+                provider=key.provider,
+                model=key.model,
+                operation=key.operation,
+                duration_seconds=time.monotonic() - started,
+                outcome=GeometryAttemptOutcome.succeeded,
+            )
+        )
+        return result, _GeometryFailure(
+            GeometryFailureCategory.unknown,
+            RuntimeError("No failure."),
+        )
+
+    @staticmethod
+    def _failure_category(error: Exception) -> GeometryFailureCategory:
+        explicit = getattr(error, "failure_category", None)
+        if isinstance(explicit, GeometryFailureCategory):
+            return explicit
+        integration_mapping = {
+            IntegrationFailureCategory.timeout: GeometryFailureCategory.timeout,
+            IntegrationFailureCategory.connectivity: GeometryFailureCategory.connectivity,
+            IntegrationFailureCategory.rate_limit: GeometryFailureCategory.rate_limit,
+            IntegrationFailureCategory.http_error: GeometryFailureCategory.provider_error,
+            IntegrationFailureCategory.invalid_response: GeometryFailureCategory.invalid_json,
+        }
+        if isinstance(explicit, IntegrationFailureCategory):
+            return integration_mapping[explicit]
+        diagnostics = exception_diagnostics(error)
+        if diagnostics.status_code == 429:
+            return GeometryFailureCategory.rate_limit
+        chain: list[BaseException] = []
+        current: BaseException | None = error
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            chain.append(current)
+            current = current.__cause__
+        if any(
+            isinstance(item, (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException))
+            for item in chain
+        ):
+            return GeometryFailureCategory.timeout
+        if any(isinstance(item, json.JSONDecodeError) for item in chain):
+            return GeometryFailureCategory.invalid_json
+        if any(
+            isinstance(item, (httpx.TransportError, ConnectionError))
+            for item in chain
+        ):
+            return GeometryFailureCategory.connectivity
+        if diagnostics.status_code is not None:
+            return GeometryFailureCategory.provider_error
+        return GeometryFailureCategory.unknown
+
+    @staticmethod
+    def _fallback_success_warning(
+        local_failure: GeometryFailureCategory,
+    ) -> str:
+        if local_failure in {
+            GeometryFailureCategory.invalid_json,
+            GeometryFailureCategory.invalid_schema,
+            GeometryFailureCategory.invalid_dsl,
+        }:
+            return (
+                "The local visualization parser produced an invalid proposal; a "
+                "deterministically validated NVIDIA proposal was used instead."
+            )
+        return (
+            "The local visualization parser was unavailable; a deterministically "
+            "validated NVIDIA proposal was used instead."
+        )
+
+    @staticmethod
+    def _failure_warning(category: GeometryFailureCategory) -> str:
+        if category is GeometryFailureCategory.deadline_exceeded:
+            return (
+                "The visualization request deadline was exhausted before a validated "
+                "plan was produced."
+            )
+        if category in {
+            GeometryFailureCategory.invalid_json,
+            GeometryFailureCategory.invalid_schema,
+            GeometryFailureCategory.invalid_dsl,
+        }:
+            return (
+                "Every model-generated visualization proposal failed deterministic "
+                "validation; no visualization was generated."
+            )
+        return (
+            "No available visualization model produced a validated plan; no "
+            "visualization was generated."
+        )
+
+    @staticmethod
+    def _log_attempt_failure(
+        *,
+        request_id: str | None,
+        environment: VisualizationEnvironment,
+        provider: GeometryProvider,
+        model: str,
+        operation: GeometryOperation,
+        category: GeometryFailureCategory,
+        error: Exception,
+    ) -> None:
+        diagnostics = exception_diagnostics(error)
+        logger.warning(
+            "Geometry model attempt failed request_id=%s provider=%s model=%s "
+            "operation=%s environment=%s failure_category=%s error_type=%s "
+            "error_message=%s status_code=%s response_body=%s",
+            request_id,
+            provider.value,
+            model,
+            operation.value,
+            environment.value,
+            category.value,
+            diagnostics.error_type,
+            diagnostics.error_message,
+            diagnostics.status_code,
+            diagnostics.response_body,
         )
 
     def _retrieve_commands(
@@ -842,6 +1376,7 @@ class GeometryExtractor:
         retrieved: tuple[RetrievedCommand, ...],
         *,
         request_id: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> GeometryExtractionResult:
         command_names = sorted(
             {command.name for command in retrieved}, key=str.casefold
@@ -890,7 +1425,11 @@ class GeometryExtractor:
             ),
             thinking_budget_tokens=0,
             timeout_seconds=float(
-                getattr(self.settings, "local_llama_geometry_timeout_seconds", 8.0)
+                timeout_seconds
+                if timeout_seconds is not None
+                else getattr(
+                    self.settings, "local_llama_geometry_timeout_seconds", 8.0
+                )
             ),
             json_schema=geometry_response_schema(
                 command_names,
@@ -902,12 +1441,18 @@ class GeometryExtractor:
             trace_id=request_id,
         )
 
-        dsl, summary = self._parse_geometry_payload(
-            payload,
-            environment=environment,
-            source="Local llama-server",
-            allowed_command_names=set(command_names),
-        )
+        try:
+            dsl, summary = self._parse_geometry_payload(
+                payload,
+                environment=environment,
+                source="Local llama-server",
+                allowed_command_names=set(command_names),
+            )
+        except (ValidationError, ValueError) as exc:
+            raise GeometryProposalValidationError(
+                "Local llama-server output did not match the required geometry schema.",
+                category=GeometryFailureCategory.invalid_schema,
+            ) from exc
         validation = self.validator.validate(
             dsl, allowed_command_names={command.name for command in retrieved}
         )
@@ -919,7 +1464,12 @@ class GeometryExtractor:
         issues.extend(self._validate_local_prompt_grounding(text, dsl))
         issues.extend(self._validate_intent_alignment(text, dsl))
         if issues:
-            raise ValueError("Invalid local geometry DSL: " + "; ".join(issues))
+            raise GeometryProposalValidationError(
+                "Invalid local geometry DSL: " + "; ".join(issues),
+                category=GeometryFailureCategory.invalid_dsl,
+                dsl=dsl,
+                summary=summary,
+            )
         dsl.actions = list(validation.actions)
 
         return GeometryExtractionResult(
@@ -965,6 +1515,9 @@ class GeometryExtractor:
             temperature=0.1,
             json_schema=geometry_response_schema(command_names, environment),
             schema_name="geometry_visualization",
+            max_tokens=int(
+                getattr(self.settings, "geometry_extraction_max_tokens", 1_200)
+            ),
             require_parameters=False,
             allow_schema_downgrade=False,
             repair_invalid_json=False,
@@ -1005,9 +1558,34 @@ class GeometryExtractor:
                 json.dumps(dict(sorted(schema_issue_counts.items())), sort_keys=True),
             )
             raise GeometryProposalValidationError(
-                f"{provider_name} geometry output did not match the required response schema."
+                f"{provider_name} geometry output did not match the required response schema.",
+                category=GeometryFailureCategory.invalid_schema,
             ) from exc
 
+        return self._validated_remote_result(
+            text,
+            dsl,
+            summary=summary,
+            environment=environment,
+            retrieved=retrieved,
+            source=provider_name,
+            parser_model=parser_model,
+            request_id=request_id,
+        )
+
+    def _validated_remote_result(
+        self,
+        text: str,
+        dsl: GeometryDSL,
+        *,
+        summary: str,
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+        source: str,
+        parser_model: str | None = None,
+        request_id: str | None = None,
+    ) -> GeometryExtractionResult:
+        allowed_command_names = {command.name for command in retrieved}
         validation = self.validator.validate(
             dsl, allowed_command_names=allowed_command_names
         )
@@ -1016,59 +1594,18 @@ class GeometryExtractor:
             for issue in validation.issues
             if issue.severity is ValidationSeverity.error
         )
-        repair_attempted = False
-        if errors:
-            self._log_remote_validation_outcome(
-                request_id=request_id,
-                parser_model=parser_model,
-                environment=environment,
-                issues=errors,
-                repair_attempted=False,
-                repair_succeeded=False,
-            )
-            repair_attempted = True
-            repaired_dsl = await self._repair_remote_dsl(
-                dsl,
-                errors,
-                parser_model=parser_model,
-                environment=environment,
-                retrieved=retrieved,
-                request_id=request_id,
-                completion_client=selected_client,
-                provider_name=provider_name,
-            )
-            if repaired_dsl is not None:
-                dsl = repaired_dsl
-                validation = self.validator.validate(
-                    dsl, allowed_command_names=allowed_command_names
-                )
-                errors = tuple(
-                    issue
-                    for issue in validation.issues
-                    if issue.severity is ValidationSeverity.error
-                )
-
         semantic_issues = self._validate_intent_alignment(text, dsl)
-        if not dsl.actions:
-            semantic_issues.insert(
-                0, "The geometry proposal contained no construction actions."
-            )
-        self._log_remote_validation_outcome(
-            request_id=request_id,
-            parser_model=parser_model,
-            environment=environment,
-            issues=errors,
-            repair_attempted=repair_attempted,
-            repair_succeeded=repair_attempted and not errors and not semantic_issues,
-        )
         if errors or not dsl.actions:
             issue_codes = Counter(issue.code for issue in errors)
-            if semantic_issues:
-                issue_codes["semantic_mismatch"] += len(semantic_issues)
+            if not dsl.actions:
+                issue_codes["empty_proposal"] += 1
             raise GeometryProposalValidationError(
-                "The model-generated visualization plan failed deterministic validation "
-                "after at most one repair attempt: "
-                + json.dumps(dict(sorted(issue_codes.items())), sort_keys=True)
+                f"{source} geometry proposal failed deterministic validation: "
+                + json.dumps(dict(sorted(issue_codes.items())), sort_keys=True),
+                category=GeometryFailureCategory.invalid_dsl,
+                dsl=dsl,
+                summary=summary,
+                issues=errors,
             )
 
         dsl.actions = list(validation.actions)
@@ -1078,7 +1615,7 @@ class GeometryExtractor:
                 "Remote geometry proposal accepted with incomplete intent alignment "
                 "request_id=%s model=%s environment=%s action_count=%s issue_count=%s",
                 request_id,
-                parser_model,
+                parser_model or source,
                 environment.value,
                 len(dsl.actions),
                 len(semantic_issues),
@@ -1106,7 +1643,8 @@ class GeometryExtractor:
         request_id: str | None = None,
         completion_client: Any | None = None,
         provider_name: str = "NVIDIA",
-    ) -> GeometryDSL | None:
+        timeout_seconds: float | None = None,
+    ) -> GeometryDSL:
         issues_by_index: dict[int, list[GeoGebraValidationIssue]] = {}
         for issue in validation_issues:
             index = issue.action_index
@@ -1119,7 +1657,12 @@ class GeometryExtractor:
                 request_id,
                 parser_model,
             )
-            return None
+            raise GeometryProposalValidationError(
+                "The invalid proposal had no action-scoped repair target.",
+                category=GeometryFailureCategory.invalid_dsl,
+                dsl=dsl,
+                issues=validation_issues,
+            )
 
         failing_fragments = [
             {
@@ -1135,61 +1678,61 @@ class GeometryExtractor:
             {command.name for command in retrieved}, key=str.casefold
         )
         discovery_context = self._format_command_context(retrieved)
-        try:
-            selected_client = completion_client or self.nvidia_client
-            payload = await selected_client.complete_json(
-                model=parser_model,
-                system_prompt=(
-                    "Repair only the supplied failing Geometry DSL actions. Return one JSON "
-                    "object with a replacements array. Every item must contain the original "
-                    "zero-based action_index and one complete corrected typed action. Do not "
-                    "return non-failing actions, prose, raw GeoGebra syntax, scripts, or "
-                    "JavaScript. EXECUTE_COMMAND may use only the retrieved commands below.\n\n"
-                    "Exact format example:\n"
-                    '{"replacements":[{"action_index":2,"action":{"action":'
-                    '"CREATE_LINE","label":"lAB","points":["A","B"]}}]}\n\n'
-                    f"Environment: {environment.value}\nRetrieved commands:\n{discovery_context}"
-                ),
-                user_prompt=json.dumps(
-                    {"failing_actions": failing_fragments},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-                temperature=0.0,
-                json_schema=geometry_repair_schema(
-                    command_names, replacement_count=len(issues_by_index)
-                ),
-                schema_name="geometry_action_repair",
-                require_parameters=False,
-                allow_schema_downgrade=False,
-                repair_invalid_json=False,
-                timeout_seconds=remote_model_timeout_seconds(
+        selected_client = completion_client or self.nvidia_client
+        payload = await selected_client.complete_json(
+            model=parser_model,
+            system_prompt=(
+                "Repair only the supplied failing Geometry DSL actions. Return one JSON "
+                "object with a replacements array. Every item must contain the original "
+                "zero-based action_index and one complete corrected typed action. Do not "
+                "return non-failing actions, prose, raw GeoGebra syntax, scripts, or "
+                "JavaScript. EXECUTE_COMMAND may use only the retrieved commands below.\n\n"
+                "Exact format example:\n"
+                '{"replacements":[{"action_index":2,"action":{"action":'
+                '"CREATE_LINE","label":"lAB","points":["A","B"]}}]}\n\n'
+                f"Environment: {environment.value}\nRetrieved commands:\n{discovery_context}"
+            ),
+            user_prompt=json.dumps(
+                {"failing_actions": failing_fragments},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            temperature=0.0,
+            json_schema=geometry_repair_schema(
+                command_names, replacement_count=len(issues_by_index)
+            ),
+            schema_name="geometry_action_repair",
+            max_tokens=int(
+                getattr(self.settings, "geometry_repair_max_tokens", 800)
+            ),
+            require_parameters=False,
+            allow_schema_downgrade=False,
+            repair_invalid_json=False,
+            timeout_seconds=(
+                float(timeout_seconds)
+                if timeout_seconds is not None
+                else remote_model_timeout_seconds(
                     self.settings,
                     provider="nvidia_direct",
                     model=parser_model,
-                ),
-                operation="geometry_repair",
-                trace_id=request_id,
-            )
+                )
+            ),
+            operation="geometry_repair",
+            trace_id=request_id,
+        )
+        try:
             replacements = self._parse_repair_replacements(
                 payload,
                 expected_indices=tuple(sorted(issues_by_index)),
                 allowed_command_names=set(command_names),
             )
-        except Exception as exc:
-            diagnostics = exception_diagnostics(exc)
-            logger.warning(
-                "Remote geometry repair failed request_id=%s provider=%s model=%s "
-                "error_type=%s error_message=%s status_code=%s response_body=%s",
-                request_id,
-                provider_name,
-                parser_model,
-                diagnostics.error_type,
-                diagnostics.error_message,
-                diagnostics.status_code,
-                diagnostics.response_body,
-            )
-            return None
+        except (ValidationError, ValueError) as exc:
+            raise GeometryProposalValidationError(
+                "The geometry repair output did not match the repair schema.",
+                category=GeometryFailureCategory.invalid_schema,
+                dsl=dsl,
+                issues=validation_issues,
+            ) from exc
 
         indices = sorted(issues_by_index)
         if not replacements:
@@ -1201,7 +1744,12 @@ class GeometryExtractor:
                 parser_model,
                 len(indices),
             )
-            return None
+            raise GeometryProposalValidationError(
+                "The geometry repair contained no valid replacements.",
+                category=GeometryFailureCategory.invalid_schema,
+                dsl=dsl,
+                issues=validation_issues,
+            )
 
         merged = dsl.model_copy(deep=True)
         for index, replacement in replacements.items():
@@ -1218,198 +1766,12 @@ class GeometryExtractor:
         )
         return merged
 
-    async def _fallback_after_remote_failure(
-        self,
-        text: str,
-        environment: VisualizationEnvironment,
-        retrieved: tuple[RetrievedCommand, ...],
-        *,
-        request_id: str | None,
-        parser_model: str,
-        failure_code: str,
-    ) -> GeometryExtractionResult:
-        provider_unavailable = failure_code == "structured_output_provider_unavailable"
-        model_output_invalid = failure_code in {
-            "raw_parse_failure",
-            "schema_validation_failure",
-            "model_validation_failure",
-        }
-        if self._local_geometry_parser_enabled() and len(text.strip()) <= 4_000:
-            try:
-                fallback = await self._extract_with_local_llama(
-                    text, environment, retrieved, request_id=request_id
-                )
-                fallback.warnings.insert(
-                    0,
-                    (
-                    "No eligible remote provider supported the required visualization "
-                    "schema; the validated local geometry parser was used instead."
-                        if provider_unavailable
-                        else (
-                            "The remote visualization model produced an invalid plan; the "
-                            "validated local geometry parser was used instead."
-                            if model_output_invalid
-                            else "The remote visualization parser failed before it produced a valid "
-                            "plan; the validated local geometry parser was used instead."
-                        )
-                    ),
-                )
-                logger.info(
-                    "Remote geometry fallback succeeded request_id=%s remote_model=%s "
-                    "fallback=local_llama",
-                    request_id,
-                    parser_model,
-                )
-                return fallback
-            except Exception as exc:
-                diagnostics = exception_diagnostics(exc)
-                logger.warning(
-                    "Remote geometry local fallback failed request_id=%s remote_model=%s "
-                    "local_model=%s error_type=%s error_message=%s status_code=%s "
-                    "response_body=%s",
-                    request_id,
-                    parser_model,
-                    getattr(self.llama_client, "model", None),
-                    diagnostics.error_type,
-                    diagnostics.error_message,
-                    diagnostics.status_code,
-                    diagnostics.response_body,
-                )
+    def _fallback_after_remote_failure(
+        self, category: GeometryFailureCategory
+    ) -> GeometryFailureAction:
+        """Map one typed remote failure to its only permitted next action."""
 
-        if self.nvidia_client.enabled:
-            fallback_models = _ordered_geometry_fallback_models(parser_model)
-            for attempt_number, native_model in enumerate(fallback_models, start=1):
-                try:
-                    timeout_seconds = remote_model_timeout_seconds(
-                        self.settings,
-                        provider="nvidia_direct",
-                        model=native_model,
-                    )
-                    logger.info(
-                        "NVIDIA direct geometry fallback started request_id=%s model=%s "
-                        "operation=geometry_extraction attempt=%s/%s timeout_seconds=%.1f",
-                        request_id,
-                        native_model,
-                        attempt_number,
-                        len(fallback_models),
-                        timeout_seconds,
-                    )
-                    fallback = await self._extract_with_llm(
-                        text,
-                        native_model,
-                        environment,
-                        retrieved,
-                        request_id=request_id,
-                        completion_client=self.nvidia_client,
-                        provider_name="NVIDIA",
-                        timeout_seconds=timeout_seconds,
-                    )
-                    fallback.warnings.insert(
-                        0,
-                        (
-                            "No eligible remote provider supported the required "
-                            "visualization schema; a deterministically validated NVIDIA "
-                            "direct proposal was used instead."
-                            if provider_unavailable
-                            else (
-                                "The remote visualization model produced an invalid plan; a "
-                                "deterministically validated NVIDIA direct proposal was used instead."
-                                if model_output_invalid
-                                else "Remote visualization extraction failed; a deterministically "
-                                "validated NVIDIA direct proposal was used instead."
-                            )
-                        ),
-                    )
-                    return fallback
-                except Exception as exc:
-                    diagnostics = exception_diagnostics(exc)
-                    logger.warning(
-                        "NVIDIA direct geometry fallback failed request_id=%s model=%s "
-                        "operation=geometry_extraction attempt=%s/%s error_type=%s "
-                        "error_message=%s status_code=%s response_body=%s",
-                        request_id,
-                        native_model,
-                        attempt_number,
-                        len(fallback_models),
-                        diagnostics.error_type,
-                        diagnostics.error_message,
-                        diagnostics.status_code,
-                        diagnostics.response_body,
-                    )
-
-        return self._empty_extraction(
-            environment,
-            retrieved,
-            (
-                    "No eligible remote provider supported the required visualization "
-                    "schema, and no validated fallback produced a plan; no visualization "
-                    "was generated."
-                    if provider_unavailable
-                    else (
-                        "The model-generated visualization plan failed validation, and no validated "
-                        "fallback produced one; no visualization was generated."
-                        if model_output_invalid
-                        else "The remote visualization model failed before producing a valid plan, "
-                        "and no validated fallback produced one; no visualization was generated."
-                    )
-                ),
-        )
-
-    def _log_remote_validation_outcome(
-        self,
-        *,
-        request_id: str | None,
-        parser_model: str,
-        environment: VisualizationEnvironment,
-        issues: tuple[GeoGebraValidationIssue, ...],
-        repair_attempted: bool,
-        repair_succeeded: bool,
-    ) -> None:
-        issue_counts = Counter(issue.code for issue in issues)
-        log = logger.warning if issues else logger.info
-        log(
-            "Remote geometry validation outcome request_id=%s model=%s environment=%s "
-            "passed=%s issue_codes=%s repair_attempted=%s repair_succeeded=%s",
-            request_id,
-            parser_model,
-            environment.value,
-            not issues,
-            json.dumps(dict(sorted(issue_counts.items())), sort_keys=True),
-            repair_attempted,
-            repair_succeeded,
-        )
-
-    def _remote_failure_code(self, error: Exception) -> str:
-        explicit_failure_code = getattr(error, "failure_code", None)
-        if isinstance(explicit_failure_code, str):
-            return explicit_failure_code
-        diagnostics = exception_diagnostics(error)
-        message = diagnostics.error_message.casefold()
-        response_body = (diagnostics.response_body or "").casefold()
-        combined = f"{message} {response_body}"
-        if "invalid json" in message:
-            return "raw_parse_failure"
-        if "geometry dsl schema" in message or "schema validation" in message:
-            return "schema_validation_failure"
-        provider_markers = (
-            "no eligible",
-            "no endpoint",
-            "requested parameters",
-            "require_parameters",
-            "structured output provider unavailable",
-        )
-        if (
-            diagnostics.status_code == 404
-            and any(marker in combined for marker in provider_markers)
-        ) or any(
-            marker in combined
-            for marker in (
-                "no eligible structured-output provider",
-                "no eligible provider",
-            )
-        ):
-            return "structured_output_provider_unavailable"
-        return "remote_request_failure"
+        return self._failure_action(GeometryProvider.nvidia, category)
 
     def _validate_strict_argument_payload(
         self,

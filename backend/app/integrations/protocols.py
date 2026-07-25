@@ -20,6 +20,7 @@ class StructuredCompletionClient(Protocol):
         temperature: float = 0.2,
         json_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
+        max_tokens: int = 500,
         timeout_seconds: float | None = None,
         operation: str = "json_completion",
         trace_id: str | None = None,
