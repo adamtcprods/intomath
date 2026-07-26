@@ -1,0 +1,99 @@
+name: Update GeoGebra command catalog
+
+on:
+  schedule:
+    # Check after the GeoGebra manual's usual daytime activity (UTC).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Regenerate even when the tracked upstream commit is unchanged
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-geogebra-catalog
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Detect a GeoGebra manual update
+        id: upstream
+        env:
+          FORCE: ${{ inputs.force || false }}
+          MANUAL_REPOSITORY: https://github.com/geogebra/manual.git
+        run: |
+          set -euo pipefail
+          upstream_commit="$(git ls-remote "$MANUAL_REPOSITORY" refs/heads/main | awk '{print $1}')"
+          test -n "$upstream_commit"
+          tracked_commit="$(python -c 'import json; print(json.load(open("backend/geogebra_commands.json.metadata.json", encoding="utf-8"))["upstream_commit"])')"
+
+          echo "commit=$upstream_commit" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE" = "true" ] || [ "$upstream_commit" != "$tracked_commit" ]; then
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            echo "GeoGebra manual is already tracked at $upstream_commit."
+          fi
+
+      - name: Install catalog generator dependencies
+        if: steps.upstream.outputs.update == 'true'
+        working-directory: backend
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Regenerate catalog
+        if: steps.upstream.outputs.update == 'true'
+        env:
+          PYTHONPATH: backend
+        run: |
+          python backend/scripts/generate_geogebra_catalog.py \
+            --repository https://github.com/geogebra/manual \
+            --ref "${{ steps.upstream.outputs.commit }}" \
+            --output backend/geogebra_commands.json
+
+      - name: Validate regenerated catalog
+        if: steps.upstream.outputs.update == 'true'
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m pytest -q \
+            backend/tests/test_geogebra_catalog_generator.py \
+            backend/tests/test_geogebra_command_registry.py
+
+      - name: Detect catalog changes
+        id: catalog
+        if: steps.upstream.outputs.update == 'true'
+        run: |
+          if git diff --quiet -- \
+            backend/geogebra_commands.json \
+            backend/geogebra_commands.json.metadata.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit catalog update
+        if: steps.catalog.outputs.changed == 'true'
+        env:
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/geogebra_commands.json backend/geogebra_commands.json.metadata.json
+          git commit -m "chore: update GeoGebra command catalog (${UPSTREAM_COMMIT})"
+          git push
