@@ -15,6 +15,11 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.config import get_settings
+from app.core.model_policy import (
+    NVIDIA_DIRECT_FALLBACK_MODELS,
+    NVIDIA_GPT_OSS_20B_MODEL,
+    remote_model_timeout_seconds,
+)
 from app.integrations.errors import (
     IntegrationFailureCategory,
     exception_diagnostics,
@@ -37,11 +42,6 @@ from app.services.geogebra_command_registry import (
     RetrievedCommand,
 )
 from app.services.geogebra_validator import GeoGebraDSLValidator
-from app.services.model_router import (
-    NVIDIA_DIRECT_FALLBACK_MODELS,
-    NVIDIA_GPT_OSS_20B_MODEL,
-    remote_model_timeout_seconds,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -1492,24 +1492,57 @@ class GeometryExtractor:
         provider_name: str = "NVIDIA",
         timeout_seconds: float | None = None,
     ) -> GeometryExtractionResult:
-        allowed_command_names = {command.name for command in retrieved}
-        command_names = sorted(allowed_command_names, key=str.casefold)
-        discovery_context = self._format_command_context(retrieved)
         selected_client = completion_client or self.nvidia_client
-        payload = await selected_client.complete_json(
+        command_names = sorted(
+            {command.name for command in retrieved},
+            key=str.casefold,
+        )
+        payload = await self._request_remote_geometry(
+            selected_client,
+            text=text,
+            parser_model=parser_model,
+            environment=environment,
+            retrieved=retrieved,
+            command_names=command_names,
+            request_id=request_id,
+            timeout_seconds=timeout_seconds,
+        )
+        dsl, summary = self._parse_remote_geometry_payload(
+            payload,
+            environment=environment,
+            provider_name=provider_name,
+            parser_model=parser_model,
+            command_names=command_names,
+            request_id=request_id,
+        )
+        return self._validated_remote_result(
+            text,
+            dsl,
+            summary=summary,
+            environment=environment,
+            retrieved=retrieved,
+            source=provider_name,
+            parser_model=parser_model,
+            request_id=request_id,
+        )
+
+    async def _request_remote_geometry(
+        self,
+        completion_client: Any,
+        *,
+        text: str,
+        parser_model: str,
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+        command_names: list[str],
+        request_id: str | None,
+        timeout_seconds: float | None,
+    ) -> dict[str, Any]:
+        return await completion_client.complete_json(
             model=parser_model,
-            system_prompt=(
-                "Extract only visualization intents for a math problem. Output JSON with exactly the "
-                "top-level keys summary and dsl; keep summary at 200 characters or fewer. Use DSL "
-                "version 1.1 with version, space, environment, actions, render_hints. "
-                "Supported actions: CREATE_POINT, CREATE_LINE, CREATE_CIRCLE, CREATE_POLYGON, INTERSECT, "
-                "MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION, DEFINE_OBJECT, "
-                "EXECUTE_COMMAND. Prefer DEFINE_OBJECT for explicit function definitions. "
-                "EXECUTE_COMMAND arguments must be typed objects and its command must appear in the "
-                "retrieved list. Never return raw GeoGebra commands or JavaScript. When an explicit "
-                "visualization request omits placement or scale, choose simple finite display "
-                "coordinates or dimensions without implying extra mathematical relationships.\n\n"
-                f"Environment: {environment.value}\nRetrieved commands:\n{discovery_context}"
+            system_prompt=self._remote_geometry_system_prompt(
+                environment,
+                retrieved,
             ),
             user_prompt=text,
             temperature=0.1,
@@ -1533,8 +1566,19 @@ class GeometryExtractor:
             operation="geometry_extraction",
             trace_id=request_id,
         )
+
+    def _parse_remote_geometry_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        environment: VisualizationEnvironment,
+        provider_name: str,
+        parser_model: str,
+        command_names: list[str],
+        request_id: str | None,
+    ) -> tuple[GeometryDSL, str]:
         try:
-            dsl, summary = self._parse_geometry_payload(
+            return self._parse_geometry_payload(
                 payload,
                 environment=environment,
                 source=provider_name,
@@ -1562,15 +1606,24 @@ class GeometryExtractor:
                 category=GeometryFailureCategory.invalid_schema,
             ) from exc
 
-        return self._validated_remote_result(
-            text,
-            dsl,
-            summary=summary,
-            environment=environment,
-            retrieved=retrieved,
-            source=provider_name,
-            parser_model=parser_model,
-            request_id=request_id,
+    def _remote_geometry_system_prompt(
+        self,
+        environment: VisualizationEnvironment,
+        retrieved: tuple[RetrievedCommand, ...],
+    ) -> str:
+        return (
+            "Extract only visualization intents for a math problem. Output JSON with exactly the "
+            "top-level keys summary and dsl; keep summary at 200 characters or fewer. Use DSL "
+            "version 1.1 with version, space, environment, actions, render_hints. "
+            "Supported actions: CREATE_POINT, CREATE_LINE, CREATE_CIRCLE, CREATE_POLYGON, INTERSECT, "
+            "MIDPOINT, PERPENDICULAR, PARALLEL, ANGLE_BISECTOR, CREATE_FUNCTION, DEFINE_OBJECT, "
+            "EXECUTE_COMMAND. Prefer DEFINE_OBJECT for explicit function definitions. "
+            "EXECUTE_COMMAND arguments must be typed objects and its command must appear in the "
+            "retrieved list. Never return raw GeoGebra commands or JavaScript. When an explicit "
+            "visualization request omits placement or scale, choose simple finite display "
+            "coordinates or dimensions without implying extra mathematical relationships.\n\n"
+            f"Environment: {environment.value}\nRetrieved commands:\n"
+            f"{self._format_command_context(retrieved)}"
         )
 
     def _validated_remote_result(

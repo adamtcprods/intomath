@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.solve_metrics import record_model_attempt
 from app.integrations.local_deepseek_ocr import LocalDeepSeekOCR
 from app.services.cache import TTLCache
 
@@ -70,6 +71,11 @@ class OCRService:
             cache_key[:12],
         )
         try:
+            record_model_attempt(
+                provider="local",
+                model=str(self.local_ocr.model_id),
+                operation="ocr",
+            )
             raw_text = await self.local_ocr.extract_text(
                 image_bytes=image_bytes,
                 mime_type=normalized_mime_type,

@@ -35,7 +35,16 @@ Create a virtual environment and install dependencies:
 
 ```bash
 python3 -m venv .venv-local
-.venv-local/bin/pip install -r backend/requirements.txt
+.venv-local/bin/pip install -e "backend[dev]"
+```
+
+`backend/pyproject.toml` is the canonical dependency definition.
+`backend/requirements.txt` mirrors only its core runtime dependencies for
+environments that require a requirements file. The large local OCR stack is
+optional; install it only on workers that process images:
+
+```bash
+.venv-local/bin/pip install -e "backend[ocr-ml]"
 ```
 
 ### Geometry DSL `1.1` artifact migration

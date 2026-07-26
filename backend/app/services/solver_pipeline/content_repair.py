@@ -9,7 +9,7 @@ from typing import Any
 
 from app.integrations.errors import exception_diagnostics
 from app.integrations.protocols import StructuredCompletionClient
-from app.services.model_router import StructuredModelEndpoint
+from app.core.model_policy import StructuredModelEndpoint
 
 from .content_quality import StructuredContentIssue, structured_content_issues
 from .prompts import (

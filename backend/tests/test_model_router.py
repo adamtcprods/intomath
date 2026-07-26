@@ -3,14 +3,14 @@ from app.schemas.common import Difficulty, ProblemType
 from app.schemas.geometry_dsl import VisualizationEnvironment
 from types import SimpleNamespace
 
-from app.services.model_router import (
+from app.core.model_policy import (
     EASY_MODEL,
     HARD_MODEL,
     LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
-    ModelRouter,
     remote_model_timeout_seconds,
     structured_model_endpoints,
 )
+from app.services.model_router import ModelRouter
 
 VIETNAMESE_GEOMETRY_PROOF = r"""
 Cho tam giác (ABC) ((AB < AC)) nội tiếp đường tròn ((O;R)) có đường kính (BC).

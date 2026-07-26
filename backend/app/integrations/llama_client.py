@@ -11,6 +11,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
+from app.core.solve_metrics import record_model_attempt
 from app.integrations.errors import (
     IntegrationFailureCategory,
     IntegrationRequestError,
@@ -186,6 +187,11 @@ class LlamaClient:
             selected_model,
             base_url,
             request_timeout,
+        )
+        record_model_attempt(
+            provider="llama.cpp",
+            model=selected_model,
+            operation=operation,
         )
         try:
             extra_body = (

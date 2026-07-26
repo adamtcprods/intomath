@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.services.model_router import StructuredModelEndpoint
+from app.core.model_policy import StructuredModelEndpoint
 from app.services.solver_pipeline.content_repair import (
     repair_missing_structured_steps,
 )

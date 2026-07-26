@@ -1,3 +1,6 @@
+# Generated from the core [project.dependencies] in pyproject.toml.
+# Development: pip install -e ".[dev]"
+# Local DeepSeek OCR model: pip install -e ".[ocr-ml]"
 fastapi>=0.115.14
 uvicorn[standard]>=0.35.0
 pydantic>=2.11.7
@@ -7,6 +10,4 @@ alembic>=1.16.2
 psycopg[binary]>=3.2.9
 httpx>=0.28.1
 pillow>=11.0.0
-
-pytest>=8.4.1
 openai>=2.0.0

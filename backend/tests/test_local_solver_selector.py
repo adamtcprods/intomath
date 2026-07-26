@@ -1,9 +1,9 @@
 import asyncio
 from typing import Any
 
+from app.core.model_policy import SolveRoute
 from app.schemas.common import Difficulty, ProblemType
 from app.services.local_solver_selector import LocalSolverSelector
-from app.services.model_router import SolveRoute
 
 
 class LocalSolverSettings:

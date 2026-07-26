@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from app.core.model_policy import (
+    EASY_MODEL,
+    HARD_MODEL,
+    LOCAL_DETERMINISTIC_SOLVER_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
+    LOCAL_LLAMA_TRIVIA_MODEL,
+    SolveRoute,
+    VISION_MODEL,
+)
 from app.schemas.common import Difficulty, ProblemType
 from app.schemas.geometry_dsl import VisualizationEnvironment
 
@@ -12,66 +20,6 @@ if TYPE_CHECKING:
     from app.integrations.llama_client import LlamaClient
 
 logger = logging.getLogger(__name__)
-
-EASY_MODEL = "openai/gpt-oss-20b"
-HARD_MODEL = "openai/gpt-oss-120b"
-
-NVIDIA_GPT_OSS_120B_MODEL = "openai/gpt-oss-120b"
-NVIDIA_GPT_OSS_20B_MODEL = "openai/gpt-oss-20b"
-NVIDIA_DIRECT_FALLBACK_MODELS = (
-    NVIDIA_GPT_OSS_120B_MODEL,
-    NVIDIA_GPT_OSS_20B_MODEL,
-)
-NVIDIA_GPT_OSS_MODELS = frozenset(
-    {NVIDIA_GPT_OSS_120B_MODEL, NVIDIA_GPT_OSS_20B_MODEL}
-)
-NVIDIA_LARGE_MODELS = frozenset(
-    {NVIDIA_GPT_OSS_120B_MODEL}
-)
-NVIDIA_DIRECT_ROUTING_PREFIX = "nvidia-direct:"
-LOCAL_DETERMINISTIC_SOLVER_MODEL = "local:deterministic-solver"
-LOCAL_SAFE_FALLBACK_MODEL = "local:safe-fallback"
-LOCAL_LLAMA_GEOMETRY_PARSER_MODEL = "local:llama-geometry-parser"
-LOCAL_LLAMA_TRIVIA_MODEL = "local:llama-trivia"
-VISION_MODEL = "local:deepseek-ai/deepseek-ocr-2"
-
-
-class SolveRoute(str, Enum):
-    deterministic = "deterministic"
-    local_trivia = "local_trivia"
-    remote = "remote"
-
-
-@dataclass(frozen=True)
-class StructuredModelEndpoint:
-    provider: str
-    model: str
-    routing_model: str
-
-
-def structured_model_endpoints(preferred_model: str) -> tuple[StructuredModelEndpoint, ...]:
-    if preferred_model not in {EASY_MODEL, HARD_MODEL}:
-        raise ValueError(f"Unsupported structured solver model: {preferred_model}")
-    alternate_model = EASY_MODEL if preferred_model == HARD_MODEL else HARD_MODEL
-    ordered_models = (preferred_model, alternate_model, *NVIDIA_DIRECT_FALLBACK_MODELS)
-    return tuple(
-        StructuredModelEndpoint(
-            provider="nvidia_direct",
-            model=native_model,
-            routing_model=f"{NVIDIA_DIRECT_ROUTING_PREFIX}{native_model}",
-        )
-        for native_model in dict.fromkeys(ordered_models)
-    )
-
-
-def remote_model_timeout_seconds(
-    settings: Any, *, provider: str, model: str
-) -> float:
-    if provider == "nvidia_direct" and model in NVIDIA_LARGE_MODELS:
-        return float(
-            getattr(settings, "nvidia_large_model_attempt_timeout_seconds", 50.0)
-        )
-    return float(getattr(settings, "remote_model_attempt_timeout_seconds", 25.0))
 
 UNIFIED_ROUTING_PROMPT = """
 Make one routing decision for a math prompt. Return only the schema-constrained
@@ -187,11 +135,6 @@ UNIFIED_ROUTING_RESPONSE_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
-
-# Kept as aliases for import compatibility.
-ROUTER_CLASSIFICATION_PROMPT = UNIFIED_ROUTING_PROMPT
-ROUTER_RESPONSE_SCHEMA = UNIFIED_ROUTING_RESPONSE_SCHEMA
-
 
 @dataclass
 class RoutingDecision:

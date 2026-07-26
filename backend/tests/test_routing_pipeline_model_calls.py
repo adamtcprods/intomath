@@ -4,6 +4,11 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+from app.core.model_policy import (
+    EASY_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
+    SolveRoute,
+)
 from app.schemas.common import Difficulty, ProblemType
 from app.schemas.geometry_dsl import VisualizationEnvironment
 from app.schemas.solve import SolveAnswer, SolveRequest, SolveStep
@@ -11,19 +16,9 @@ from app.services.cache import AsyncSingleFlight, TTLCache
 from app.services.fallback_solver import FallbackSolver
 from app.services.llama_trivia_solver import LlamaTriviaSolveResult
 from app.services.local_solver_selector import LocalSolverSelector
-from app.services.model_router import (
-    EASY_MODEL,
-    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
-    RoutingDecision,
-    SolveRoute,
-)
+from app.services.model_router import RoutingDecision
 from app.services.solver_pipeline.orchestration import solve_request
 from app.services.solver_pipeline.response_builder import StructuredSolveDraft
-from app.services.solver_pipeline.routing import (
-    with_local_solver_routing,
-    with_remote_solver_routing,
-    with_structured_solver_routing,
-)
 
 
 @dataclass
@@ -180,22 +175,6 @@ class PipelineService:
 
     def _build_cache_key(self, normalized_text: str, request: SolveRequest) -> str:
         return f"{normalized_text}:{request.options.include_visualization}"
-
-    def _with_local_solver_routing(self, routing, local_result, *, original_text):
-        return with_local_solver_routing(
-            routing,
-            local_result,
-            original_text=original_text,
-        )
-
-    def _with_remote_solver_routing(self, routing, *, reason):
-        return with_remote_solver_routing(routing, reason=reason)
-
-    def _with_structured_solver_routing(self, routing, *, solver_model):
-        return with_structured_solver_routing(routing, solver_model=solver_model)
-
-    def _without_backend_config_warnings(self, warnings: list[str]) -> list[str]:
-        return warnings
 
     async def _solve_structured(self, **_: object) -> StructuredSolveDraft:
         self.calls.remote_solving += 1

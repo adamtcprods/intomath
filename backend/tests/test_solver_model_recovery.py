@@ -1,9 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 
+from app.core.model_policy import HARD_MODEL, NVIDIA_GPT_OSS_20B_MODEL
 from app.schemas.common import Difficulty, ProblemType
 from app.services.fallback_solver import FallbackSolver
-from app.services.model_router import HARD_MODEL, NVIDIA_GPT_OSS_20B_MODEL
 from app.services.solver_service import SolverService
 
 

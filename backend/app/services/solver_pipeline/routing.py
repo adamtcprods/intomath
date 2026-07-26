@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from app.services.local_solver_selector import (
-    LOCAL_SOLVER_MIN_CONFIDENCE,
-    UNSUPPORTED_LOCAL_SOLVER_MARKER,
-)
-from app.services.local_solver_types import LocalSolveResult
-from app.services.model_router import (
+from app.core.model_policy import (
     EASY_MODEL,
     HARD_MODEL,
     LOCAL_DETERMINISTIC_SOLVER_MODEL,
     LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
     LOCAL_LLAMA_TRIVIA_MODEL,
-    RoutingDecision,
     SolveRoute,
 )
+from app.services.local_solver_selector import (
+    LOCAL_SOLVER_MIN_CONFIDENCE,
+    UNSUPPORTED_LOCAL_SOLVER_MARKER,
+)
+from app.services.local_solver_types import LocalSolveResult
+from app.services.model_router import RoutingDecision
 
 from .response_builder import StructuredSolveDraft
 

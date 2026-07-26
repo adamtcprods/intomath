@@ -8,6 +8,13 @@ import logging
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.model_policy import (
+    LOCAL_SAFE_FALLBACK_MODEL,
+    ModelFailureCategory,
+    StructuredModelEndpoint,
+    remote_model_timeout_seconds,
+    structured_model_endpoints,
+)
 from app.integrations.errors import exception_diagnostics
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
@@ -21,15 +28,7 @@ from app.services.exact_solver import ExactSolveResult
 from app.services.geogebra_translator import GeoGebraTranslator
 from app.services.geometry_extractor import GeometryExtractor
 from app.services.local_solver_selector import LocalSolverSelector
-from app.services.local_solver_types import LocalSolveResult
-from app.services.model_router import (
-    LOCAL_SAFE_FALLBACK_MODEL,
-    ModelRouter,
-    RoutingDecision,
-    StructuredModelEndpoint,
-    remote_model_timeout_seconds,
-    structured_model_endpoints,
-)
+from app.services.model_router import ModelRouter
 from app.services.ocr_service import OCRService
 from app.services.solver_pipeline.content_repair import (
     append_content_quality_warnings,
@@ -45,31 +44,14 @@ from app.services.solver_pipeline.prompts import (
 from app.services.solver_pipeline.response_builder import (
     StructuredSolveDraft,
     draft_from_payload,
-    fallback_draft_for_subquestions,
 )
-from app.services.solver_pipeline.routing import (
-    is_supported_local_draft,
-    with_local_solver_routing,
-    with_local_subquestion_routing,
-    with_remote_solver_routing,
-    with_structured_solver_routing,
-    without_backend_config_warnings,
-)
+from app.services.solver_pipeline.routing import without_backend_config_warnings
 from app.services.solver_pipeline.strict_models import (
     validate_structured_payload,
 )
 from app.services.solver_pipeline.subquestion import (
     DetectedSubquestion,
-    detect_subquestions,
     format_subquestion_hint,
-)
-
-# Re-exports for backward compatibility
-from app.services.solver_pipeline.content_quality import (  # noqa: F401
-    StructuredContentIssue,
-    contains_clear_math_notation,
-    looks_like_scratch_work,
-    structured_content_issues,
 )
 
 
@@ -140,59 +122,6 @@ class SolverService:
     def try_solve_exact(self, text: str) -> ExactSolveResult | None:
         return self.local_solver_selector.try_solve_exact(text)
 
-    def _with_local_solver_routing(
-        self,
-        routing: RoutingDecision,
-        local_result: LocalSolveResult,
-        *,
-        original_text: str,
-    ) -> RoutingDecision:
-        return with_local_solver_routing(
-            routing, local_result, original_text=original_text
-        )
-
-    def _with_structured_solver_routing(
-        self, routing: RoutingDecision, *, solver_model: str
-    ) -> RoutingDecision:
-        return with_structured_solver_routing(routing, solver_model=solver_model)
-
-    def _with_local_subquestion_routing(
-        self, routing: RoutingDecision, *, reason: str
-    ) -> RoutingDecision:
-        return with_local_subquestion_routing(routing, reason=reason)
-
-    def _with_remote_solver_routing(
-        self, routing: RoutingDecision, *, reason: str
-    ) -> RoutingDecision:
-        return with_remote_solver_routing(routing, reason=reason)
-
-    def _is_supported_local_draft(self, draft: StructuredSolveDraft) -> bool:
-        return is_supported_local_draft(draft)
-
-    def _without_backend_config_warnings(self, warnings: list[str]) -> list[str]:
-        return without_backend_config_warnings(warnings)
-
-    def _fallback_draft_for_subquestions(
-        self,
-        *,
-        text: str,
-        problem_type: ProblemType,
-        difficulty: Difficulty,
-        subquestions: list[DetectedSubquestion],
-        warning: str | None = None,
-        suppress_config_warnings: bool = False,
-    ) -> StructuredSolveDraft:
-        return fallback_draft_for_subquestions(
-            fallback_solver=self.fallback_solver,
-            text=text,
-            problem_type=problem_type,
-            difficulty=difficulty,
-            subquestions=subquestions,
-            warning=warning,
-            suppress_config_warnings=suppress_config_warnings,
-            warning_filter=self._without_backend_config_warnings,
-        )
-
     async def _solve_structured(
         self,
         *,
@@ -203,222 +132,328 @@ class SolverService:
         subquestions: list[DetectedSubquestion],
         request_id: str | None = None,
     ) -> StructuredSolveDraft:
-        if self.nvidia_client.enabled:
-            user_prompt = (
-                f"Problem type: {problem_type.value}\n"
-                f"Difficulty: {difficulty.value}\n"
-                f"{format_subquestion_hint(subquestions)}\nProblem:\n{text}"
-            )
-            model_failures: list[tuple[str, str, str, str, int | None]] = []
-            candidates = self._model_candidates(model)
-            for attempt_number, candidate in enumerate(candidates, start=1):
-                candidate_client: StructuredCompletionClient = self.nvidia_client
-                attempt_timeout = remote_model_timeout_seconds(
-                    self.settings, provider=candidate.provider, model=candidate.model
-                )
-                logger.info(
-                    "Structured solve model attempt started request_id=%s provider=%s "
-                    "model=%s operation=structured_math_solution attempt=%s/%s "
-                    "problem_type=%s difficulty=%s subquestions=%s timeout_seconds=%.1f",
-                    request_id,
-                    candidate.provider,
-                    candidate.model,
-                    attempt_number,
-                    len(candidates),
-                    problem_type.value,
-                    difficulty.value,
-                    len(subquestions),
-                    attempt_timeout,
-                )
-                try:
-                    payload = await candidate_client.complete_json(
-                        model=candidate.model,
-                        system_prompt=STRUCTURED_SOLVE_SYSTEM_PROMPT,
-                        user_prompt=user_prompt,
-                        temperature=0.2,
-                        json_schema=SOLVE_RESPONSE_JSON_SCHEMA,
-                        schema_name="structured_math_solution",
-                        max_tokens=int(
-                            getattr(
-                                self.settings,
-                                "structured_solution_max_tokens",
-                                4_500,
-                            )
-                        ),
-                        require_parameters=False,
-                        allow_schema_downgrade=False,
-                        repair_invalid_json=False,
-                        timeout_seconds=attempt_timeout,
-                        operation="structured_math_solution",
-                        trace_id=request_id,
-                    )
-                    validated_payload = validate_structured_payload(
-                        payload,
-                        request_id=request_id,
-                        provider=candidate.provider,
-                        model=candidate.model,
-                    )
-                    validated_payload = await repair_missing_structured_steps(
-                        validated_payload,
-                        problem_text=text,
-                        completion_client=candidate_client,
-                        candidate=candidate,
-                        timeout_seconds=attempt_timeout,
-                        max_tokens=int(
-                            getattr(
-                                self.settings,
-                                "missing_step_repair_max_tokens",
-                                2_000,
-                            )
-                        ),
-                        request_id=request_id,
-                    )
-                    initial_issues = log_structured_step_quality(
-                        validated_payload,
-                        request_id=request_id,
-                        provider=candidate.provider,
-                        model=candidate.model,
-                        stage="initial",
-                    )
-                    if any(i.code == "scratch_work_style" for i in initial_issues):
-                        validated_payload = await repair_structured_content(
-                            validated_payload,
-                            initial_issues,
-                            completion_client=candidate_client,
-                            candidate=candidate,
-                            timeout_seconds=attempt_timeout,
-                            max_tokens=int(
-                                getattr(
-                                    self.settings,
-                                    "content_repair_max_tokens",
-                                    2_500,
-                                )
-                            ),
-                            request_id=request_id,
-                        )
-                    final_issues = log_structured_step_quality(
-                        validated_payload,
-                        request_id=request_id,
-                        provider=candidate.provider,
-                        model=candidate.model,
-                        stage="final",
-                    )
-                    append_content_quality_warnings(validated_payload, final_issues)
-                    draft = draft_from_payload(
-                        validated_payload, expected_subquestions=subquestions
-                    )
-                    if candidate.routing_model != model:
-                        logger.warning(
-                            "Structured solve succeeded with fallback model request_id=%s "
-                            "preferred_model=%s fallback_provider=%s fallback_model=%s",
-                            request_id,
-                            model,
-                            candidate.provider,
-                            candidate.model,
-                        )
-                        draft.warnings.append(
-                            "The preferred solver was unavailable; this result was produced by another solver."
-                        )
-                    draft.solver_model = candidate.routing_model
-                    logger.info(
-                        "Structured solve model attempt succeeded request_id=%s provider=%s "
-                        "model=%s routing_model=%s confidence=%.3f steps=%s parts=%s warnings=%s",
-                        request_id,
-                        candidate.provider,
-                        candidate.model,
-                        candidate.routing_model,
-                        draft.confidence,
-                        len(draft.steps),
-                        len(draft.parts),
-                        len(draft.warnings),
-                    )
-                    return draft
-                except Exception as exc:
-                    diagnostics = exception_diagnostics(exc)
-                    failure_code = self._structured_failure_code(exc)
-                    model_failures.append(
-                        (
-                            candidate.provider,
-                            candidate.model,
-                            failure_code,
-                            diagnostics.error_type,
-                            diagnostics.status_code,
-                        )
-                    )
-                    logger.warning(
-                        "Structured solve model attempt failed request_id=%s provider=%s "
-                        "model=%s operation=structured_math_solution attempt=%s/%s "
-                        "problem_type=%s difficulty=%s failure_code=%s error_type=%s "
-                        "error_message=%s status_code=%s response_body=%s",
-                        request_id,
-                        candidate.provider,
-                        candidate.model,
-                        attempt_number,
-                        len(candidates),
-                        problem_type.value,
-                        difficulty.value,
-                        failure_code,
-                        diagnostics.error_type,
-                        diagnostics.error_message,
-                        diagnostics.status_code,
-                        diagnostics.response_body,
-                    )
+        if not self.nvidia_client.enabled:
+            return self._local_fallback_draft()
 
-            answer, steps, confidence, warnings = (
-                self.fallback_solver.unsupported_result()
+        user_prompt = self._structured_user_prompt(
+            text=text,
+            problem_type=problem_type,
+            difficulty=difficulty,
+            subquestions=subquestions,
+        )
+        failures: list[tuple[str, str, str, str, int | None]] = []
+        candidates = structured_model_endpoints(model)
+        for attempt_number, candidate in enumerate(candidates, start=1):
+            attempt_timeout = remote_model_timeout_seconds(
+                self.settings,
+                provider=candidate.provider,
+                model=candidate.model,
             )
-            warnings = self._without_backend_config_warnings(warnings)
-            logger.error(
-                "All structured solve model attempts failed; using local fallback problem_type=%s difficulty=%s failures=%s",
-                problem_type.value,
-                difficulty.value,
-                model_failures,
+            self._log_structured_attempt_started(
+                candidate=candidate,
+                attempt_number=attempt_number,
+                attempt_count=len(candidates),
+                timeout_seconds=attempt_timeout,
+                problem_type=problem_type,
+                difficulty=difficulty,
+                subquestion_count=len(subquestions),
+                request_id=request_id,
             )
-            fallback_notice = "The preferred solver was unavailable; this result was produced by the local solver."
-            warnings.append(fallback_notice)
-            return StructuredSolveDraft(
-                answer,
-                steps,
-                confidence,
-                warnings,
-                parts=[],
-                solver_model=LOCAL_SAFE_FALLBACK_MODEL,
+            try:
+                draft = await self._attempt_structured_candidate(
+                    candidate=candidate,
+                    user_prompt=user_prompt,
+                    problem_text=text,
+                    subquestions=subquestions,
+                    timeout_seconds=attempt_timeout,
+                    request_id=request_id,
+                )
+            except Exception as exc:
+                failures.append(
+                    self._structured_failure_record(candidate, exc)
+                )
+                self._log_structured_attempt_failed(
+                    candidate=candidate,
+                    error=exc,
+                    attempt_number=attempt_number,
+                    attempt_count=len(candidates),
+                    problem_type=problem_type,
+                    difficulty=difficulty,
+                    request_id=request_id,
+                )
+                continue
+
+            return self._finish_structured_success(
+                draft,
+                candidate=candidate,
+                preferred_model=model,
+                request_id=request_id,
             )
 
+        logger.error(
+            "All structured solve model attempts failed; using local fallback "
+            "problem_type=%s difficulty=%s failures=%s",
+            problem_type.value,
+            difficulty.value,
+            failures,
+        )
+        return self._local_fallback_draft(provider_unavailable=True)
+
+    @staticmethod
+    def _structured_user_prompt(
+        *,
+        text: str,
+        problem_type: ProblemType,
+        difficulty: Difficulty,
+        subquestions: list[DetectedSubquestion],
+    ) -> str:
+        return (
+            f"Problem type: {problem_type.value}\n"
+            f"Difficulty: {difficulty.value}\n"
+            f"{format_subquestion_hint(subquestions)}\nProblem:\n{text}"
+        )
+
+    async def _attempt_structured_candidate(
+        self,
+        *,
+        candidate: StructuredModelEndpoint,
+        user_prompt: str,
+        problem_text: str,
+        subquestions: list[DetectedSubquestion],
+        timeout_seconds: float,
+        request_id: str | None,
+    ) -> StructuredSolveDraft:
+        client: StructuredCompletionClient = self.nvidia_client
+        payload = await client.complete_json(
+            model=candidate.model,
+            system_prompt=STRUCTURED_SOLVE_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.2,
+            json_schema=SOLVE_RESPONSE_JSON_SCHEMA,
+            schema_name="structured_math_solution",
+            max_tokens=int(
+                getattr(self.settings, "structured_solution_max_tokens", 4_500)
+            ),
+            require_parameters=False,
+            allow_schema_downgrade=False,
+            repair_invalid_json=False,
+            timeout_seconds=timeout_seconds,
+            operation="structured_math_solution",
+            trace_id=request_id,
+        )
+        validated = validate_structured_payload(
+            payload,
+            request_id=request_id,
+            provider=candidate.provider,
+            model=candidate.model,
+        )
+        validated = await self._repair_structured_payload(
+            validated,
+            problem_text=problem_text,
+            client=client,
+            candidate=candidate,
+            timeout_seconds=timeout_seconds,
+            request_id=request_id,
+        )
+        return draft_from_payload(validated, expected_subquestions=subquestions)
+
+    async def _repair_structured_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        problem_text: str,
+        client: StructuredCompletionClient,
+        candidate: StructuredModelEndpoint,
+        timeout_seconds: float,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        repaired = await repair_missing_structured_steps(
+            payload,
+            problem_text=problem_text,
+            completion_client=client,
+            candidate=candidate,
+            timeout_seconds=timeout_seconds,
+            max_tokens=int(
+                getattr(self.settings, "missing_step_repair_max_tokens", 2_000)
+            ),
+            request_id=request_id,
+        )
+        initial_issues = log_structured_step_quality(
+            repaired,
+            request_id=request_id,
+            provider=candidate.provider,
+            model=candidate.model,
+            stage="initial",
+        )
+        if any(issue.code == "scratch_work_style" for issue in initial_issues):
+            repaired = await repair_structured_content(
+                repaired,
+                initial_issues,
+                completion_client=client,
+                candidate=candidate,
+                timeout_seconds=timeout_seconds,
+                max_tokens=int(
+                    getattr(self.settings, "content_repair_max_tokens", 2_500)
+                ),
+                request_id=request_id,
+            )
+        final_issues = log_structured_step_quality(
+            repaired,
+            request_id=request_id,
+            provider=candidate.provider,
+            model=candidate.model,
+            stage="final",
+        )
+        append_content_quality_warnings(repaired, final_issues)
+        return repaired
+
+    def _finish_structured_success(
+        self,
+        draft: StructuredSolveDraft,
+        *,
+        candidate: StructuredModelEndpoint,
+        preferred_model: str,
+        request_id: str | None,
+    ) -> StructuredSolveDraft:
+        if candidate.routing_model != preferred_model:
+            logger.warning(
+                "Structured solve succeeded with fallback model request_id=%s "
+                "preferred_model=%s fallback_provider=%s fallback_model=%s",
+                request_id,
+                preferred_model,
+                candidate.provider,
+                candidate.model,
+            )
+            draft.warnings.append(
+                "The preferred solver was unavailable; this result was produced by another solver."
+            )
+        draft.solver_model = candidate.routing_model
+        logger.info(
+            "Structured solve model attempt succeeded request_id=%s provider=%s "
+            "model=%s routing_model=%s confidence=%.3f steps=%s parts=%s warnings=%s",
+            request_id,
+            candidate.provider,
+            candidate.model,
+            candidate.routing_model,
+            draft.confidence,
+            len(draft.steps),
+            len(draft.parts),
+            len(draft.warnings),
+        )
+        return draft
+
+    def _local_fallback_draft(
+        self,
+        *,
+        provider_unavailable: bool = False,
+    ) -> StructuredSolveDraft:
         answer, steps, confidence, warnings = self.fallback_solver.unsupported_result()
+        public_warnings = without_backend_config_warnings(warnings)
+        if provider_unavailable:
+            public_warnings.append(
+                "The preferred solver was unavailable; this result was produced by the local solver."
+            )
         return StructuredSolveDraft(
             answer,
             steps,
             confidence,
-            self._without_backend_config_warnings(warnings),
+            public_warnings,
             parts=[],
             solver_model=LOCAL_SAFE_FALLBACK_MODEL,
         )
 
-    def _model_candidates(
-        self, preferred_model: str
-    ) -> list[StructuredModelEndpoint]:
-        return list(structured_model_endpoints(preferred_model))
+    @staticmethod
+    def _structured_failure_record(
+        candidate: StructuredModelEndpoint,
+        error: Exception,
+    ) -> tuple[str, str, str, str, int | None]:
+        diagnostics = exception_diagnostics(error)
+        return (
+            candidate.provider,
+            candidate.model,
+            SolverService._structured_failure_code(error),
+            diagnostics.error_type,
+            diagnostics.status_code,
+        )
 
-    def _structured_failure_code(self, error: Exception) -> str:
+    @staticmethod
+    def _log_structured_attempt_started(
+        *,
+        candidate: StructuredModelEndpoint,
+        attempt_number: int,
+        attempt_count: int,
+        timeout_seconds: float,
+        problem_type: ProblemType,
+        difficulty: Difficulty,
+        subquestion_count: int,
+        request_id: str | None,
+    ) -> None:
+        logger.info(
+            "Structured solve model attempt started request_id=%s provider=%s "
+            "model=%s operation=structured_math_solution attempt=%s/%s "
+            "problem_type=%s difficulty=%s subquestions=%s timeout_seconds=%.1f",
+            request_id,
+            candidate.provider,
+            candidate.model,
+            attempt_number,
+            attempt_count,
+            problem_type.value,
+            difficulty.value,
+            subquestion_count,
+            timeout_seconds,
+        )
+
+    @staticmethod
+    def _log_structured_attempt_failed(
+        *,
+        candidate: StructuredModelEndpoint,
+        error: Exception,
+        attempt_number: int,
+        attempt_count: int,
+        problem_type: ProblemType,
+        difficulty: Difficulty,
+        request_id: str | None,
+    ) -> None:
+        diagnostics = exception_diagnostics(error)
+        logger.warning(
+            "Structured solve model attempt failed request_id=%s provider=%s "
+            "model=%s operation=structured_math_solution attempt=%s/%s "
+            "problem_type=%s difficulty=%s failure_code=%s error_type=%s "
+            "error_message=%s status_code=%s response_body=%s",
+            request_id,
+            candidate.provider,
+            candidate.model,
+            attempt_number,
+            attempt_count,
+            problem_type.value,
+            difficulty.value,
+            SolverService._structured_failure_code(error),
+            diagnostics.error_type,
+            diagnostics.error_message,
+            diagnostics.status_code,
+            diagnostics.response_body,
+        )
+
+    @staticmethod
+    def _structured_failure_code(error: Exception) -> str:
         explicit_failure_code = getattr(error, "failure_code", None)
         if isinstance(explicit_failure_code, str):
             return explicit_failure_code
         diagnostics = exception_diagnostics(error)
         message = diagnostics.error_message.casefold()
         if diagnostics.status_code == 429 or "rate limit" in message:
-            return "rate_limited"
+            return ModelFailureCategory.rate_limited.value
         if diagnostics.status_code == 404 and (
             "no endpoint" in message or "requested parameters" in message
         ):
-            return "structured_output_provider_unavailable"
+            return ModelFailureCategory.provider_unavailable.value
         if "invalid json" in message:
-            return "raw_parse_failure"
+            return ModelFailureCategory.invalid_json.value
         if isinstance(error, ValueError):
-            return "schema_validation_failure"
+            return ModelFailureCategory.invalid_schema.value
         if "timed out" in message:
-            return "timeout"
-        return "request_failure"
+            return ModelFailureCategory.timeout.value
+        return ModelFailureCategory.request_failure.value
 
     def _build_cache_key(self, normalized_text: str, request: SolveRequest) -> str:
         registry_metadata = getattr(
@@ -439,27 +474,4 @@ class SolverService:
             json.dumps(payload, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-    # Compatibility delegates for callers of the former private helpers.
-    def _detect_subquestions(self, text: str) -> list[DetectedSubquestion]:
-        return detect_subquestions(text)
-
-    def _draft_from_payload(
-        self,
-        payload: dict[str, Any],
-        *,
-        expected_subquestions: list[DetectedSubquestion] | None = None,
-    ) -> StructuredSolveDraft:
-        return draft_from_payload(
-            payload, expected_subquestions=expected_subquestions
-        )
-
-
-__all__ = [
-    "DetectedSubquestion",
-    "SolverService",
-    "StructuredContentIssue",
-    "StructuredSolveDraft",
-    "contains_clear_math_notation",
-    "looks_like_scratch_work",
-    "structured_content_issues",
-]
+__all__ = ["SolverService"]

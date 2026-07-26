@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.model_policy import SolveRoute
 from app.db.base import Base
 from app.db.models.solver_run import SolverRun
 from app.repositories.result_repository import ResultRepository
@@ -36,6 +37,7 @@ class _Router:
             vision_model=None,
             visualization_environment=None,
             reason="test route",
+            solve_route=SolveRoute.deterministic,
         )
 
 
@@ -75,6 +77,13 @@ class _CountingSelector:
             reason="matched a test expression",
         )
 
+    async def solve_selected_route(
+        self,
+        text: str,
+        *_: object,
+    ) -> LocalSolveResult:
+        return await self.solve_if_supported(text)
+
 
 class _SolveService:
     def __init__(
@@ -99,17 +108,8 @@ class _SolveService:
     def _build_cache_key(self, *_: object) -> str:
         return "identical-response-key"
 
-    def _with_local_solver_routing(
-        self,
-        routing: RoutingDecision,
-        *_: object,
-        **__: object,
-    ) -> RoutingDecision:
-        return routing
-
-    def _without_backend_config_warnings(self, warnings: list[str]) -> list[str]:
-        return warnings
-
+    def try_solve_exact(self, _: str) -> None:
+        return None
 
 def _request() -> SolveRequest:
     return SolveRequest.model_validate(

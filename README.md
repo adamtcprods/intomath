@@ -90,7 +90,9 @@ All solver responses follow the same schema:
 This prevents the UI from depending on unpredictable free-form model output.
 
 ### 2. Model routing
-The routing layer lives in `backend/app/services/model_router.py`.
+Routing behavior lives in `backend/app/services/model_router.py`; shared model
+names, endpoint order, timeout policy, and failure labels live in the neutral
+`backend/app/core/model_policy.py` module.
 
 Current models and local routes:
 - **AI-selected deterministic execution:** `local:deterministic-solver`
@@ -226,7 +228,7 @@ The frontend uses Bun as its package manager. `frontend/bun.lock` is the canonic
 ### Backend
 ```bash
 python3 -m venv .venv-local
-.venv-local/bin/pip install -r backend/requirements.txt
+.venv-local/bin/pip install -e "backend[dev]"
 cd backend
 ../.venv-local/bin/alembic upgrade head
 ../.venv-local/bin/uvicorn app.main:app --reload

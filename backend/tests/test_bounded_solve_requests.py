@@ -14,10 +14,10 @@ from PIL import Image
 
 from app.api.v1.endpoints.solve import router as solve_router
 from app.core.config import Settings
+from app.core.model_policy import StructuredModelEndpoint
 from app.dependencies import get_solver_service
 from app.schemas.geometry_dsl import GeoGebraValidationIssue, VisualizationEnvironment
 from app.services.geometry_extractor import GeometryExtractor
-from app.services.model_router import StructuredModelEndpoint
 from app.services.solver_service import SolverService
 from app.services.solver_pipeline.content_quality import structured_content_issues
 from app.services.solver_pipeline.content_repair import repair_structured_content

@@ -9,15 +9,16 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
+from app.core.model_policy import (
+    NVIDIA_GPT_OSS_MODELS,
+    remote_model_timeout_seconds,
+)
+from app.core.solve_metrics import record_model_attempt
 from app.integrations.errors import (
     IntegrationFailureCategory,
     IntegrationRequestError,
     compact_log_text,
     exception_diagnostics,
-)
-from app.services.model_router import (
-    NVIDIA_GPT_OSS_MODELS,
-    remote_model_timeout_seconds,
 )
 
 
@@ -83,42 +84,19 @@ class NvidiaClient:
                 "NVIDIA direct integration is disabled or NVIDIA_API_KEY is not configured."
             )
 
-        request_timeout = float(
-            timeout_seconds
-            if timeout_seconds is not None
-            else remote_model_timeout_seconds(
-                self.settings, provider="nvidia_direct", model=model
-            )
+        request_timeout = self._request_timeout(
+            model=model,
+            timeout_seconds=timeout_seconds,
         )
-        schema_instruction = ""
-        if json_schema is not None:
-            schema_instruction = (
-                "\n\nRequired JSON schema (deterministically validated after generation):\n"
-                + json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
-            )
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": self._json_only_system_prompt(system_prompt)
-                    + schema_instruction,
-                },
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "top_p": 0.95,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        if model in NVIDIA_GPT_OSS_MODELS:
-            reasoning_effort = self._reasoning_effort(operation)
-            payload["reasoning_effort"] = reasoning_effort
-            reasoning_controls = f"reasoning_effort={reasoning_effort}"
-        else:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
-            payload["reasoning_budget"] = 64
-            reasoning_controls = "enable_thinking=false reasoning_budget=64"
+        payload, reasoning_controls = self._build_payload(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            json_schema=json_schema,
+            max_tokens=max_tokens,
+            operation=operation,
+        )
         logger.info(
             "NVIDIA direct request started operation=%s trace_id=%s model=%s "
             "schema_name=%s max_tokens=%s timeout_seconds=%.1f stream=false %s "
@@ -131,112 +109,18 @@ class NvidiaClient:
             request_timeout,
             reasoning_controls,
         )
-
-        timeout = httpx.Timeout(
-            request_timeout,
-            connect=min(10.0, request_timeout),
-            read=request_timeout,
-            write=min(10.0, request_timeout),
-            pool=min(10.0, request_timeout),
+        record_model_attempt(
+            provider="nvidia_direct",
+            model=model,
+            operation=operation,
         )
-        try:
-            response = await asyncio.wait_for(
-                self.http_client.post(
-                    f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.settings.nvidia_api_key}",
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
-                    json=payload,
-                    timeout=timeout,
-                ),
-                timeout=request_timeout,
-            )
-        except (TimeoutError, httpx.TimeoutException) as exc:
-            error = IntegrationRequestError(
-                f"NVIDIA direct request timed out after {request_timeout:.1f}s "
-                f"for model {model}.",
-                provider="NVIDIA",
-                model=model,
-                operation=operation,
-                failure_category=IntegrationFailureCategory.timeout,
-            )
-            diagnostics = exception_diagnostics(error)
-            logger.warning(
-                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
-                "error_type=%s error_message=%s status_code=%s response_body=%s",
-                operation,
-                trace_id,
-                model,
-                diagnostics.error_type,
-                diagnostics.error_message,
-                diagnostics.status_code,
-                diagnostics.response_body,
-            )
-            raise error from exc
-        except httpx.HTTPError as exc:
-            diagnostics = exception_diagnostics(exc)
-            error = IntegrationRequestError(
-                f"NVIDIA direct request failed for model {model}: "
-                f"{diagnostics.error_message}",
-                provider="NVIDIA",
-                model=model,
-                operation=operation,
-                status_code=diagnostics.status_code,
-                response_body=diagnostics.response_body,
-                failure_category=IntegrationFailureCategory.connectivity,
-            )
-            logger.warning(
-                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
-                "error_type=%s error_message=%s status_code=%s response_body=%s",
-                operation,
-                trace_id,
-                model,
-                diagnostics.error_type,
-                diagnostics.error_message,
-                diagnostics.status_code,
-                diagnostics.response_body,
-            )
-            raise error from exc
-
-        response_body = compact_log_text(response.text, limit=2_000)
-        if response.status_code >= 400:
-            logger.warning(
-                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
-                "status_code=%s response_body=%s",
-                operation,
-                trace_id,
-                model,
-                response.status_code,
-                response_body,
-            )
-            raise IntegrationRequestError(
-                f"NVIDIA direct request failed for model {model}: HTTP {response.status_code}.",
-                provider="NVIDIA",
-                model=model,
-                operation=operation,
-                status_code=response.status_code,
-                response_body=response.text,
-                failure_category=(
-                    IntegrationFailureCategory.rate_limit
-                    if response.status_code == 429
-                    else IntegrationFailureCategory.http_error
-                ),
-            )
-        try:
-            data = response.json()
-        except json.JSONDecodeError as exc:
-            raise IntegrationRequestError(
-                f"NVIDIA direct returned a non-JSON HTTP response for model {model}.",
-                provider="NVIDIA",
-                model=model,
-                operation=operation,
-                status_code=response.status_code,
-                response_body=response.text,
-                failure_category=IntegrationFailureCategory.invalid_response,
-            ) from exc
-
+        data = await self._send_request(
+            payload,
+            model=model,
+            operation=operation,
+            trace_id=trace_id,
+            timeout_seconds=request_timeout,
+        )
         try:
             text = self._extract_response_text(data, model=model)
             result = self._loads_json_response(
@@ -275,6 +159,210 @@ class NvidiaClient:
             len(text),
         )
         return result
+
+    def _request_timeout(
+        self,
+        *,
+        model: str,
+        timeout_seconds: float | None,
+    ) -> float:
+        if timeout_seconds is not None:
+            return float(timeout_seconds)
+        return remote_model_timeout_seconds(
+            self.settings,
+            provider="nvidia_direct",
+            model=model,
+        )
+
+    def _build_payload(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        json_schema: dict[str, Any] | None,
+        max_tokens: int,
+        operation: str,
+    ) -> tuple[dict[str, Any], str]:
+        schema_instruction = ""
+        if json_schema is not None:
+            schema_instruction = (
+                "\n\nRequired JSON schema (deterministically validated after generation):\n"
+                + json.dumps(json_schema, ensure_ascii=False, separators=(",", ":"))
+            )
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": self._json_only_system_prompt(system_prompt)
+                    + schema_instruction,
+                },
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "top_p": 0.95,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+        if model in NVIDIA_GPT_OSS_MODELS:
+            effort = self._reasoning_effort(operation)
+            payload["reasoning_effort"] = effort
+            return payload, f"reasoning_effort={effort}"
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload["reasoning_budget"] = 64
+        return payload, "enable_thinking=false reasoning_budget=64"
+
+    async def _send_request(
+        self,
+        payload: dict[str, Any],
+        *,
+        model: str,
+        operation: str,
+        trace_id: str | None,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        try:
+            response = await asyncio.wait_for(
+                self.http_client.post(
+                    f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.settings.nvidia_api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json=payload,
+                    timeout=self._http_timeout(timeout_seconds),
+                ),
+                timeout=timeout_seconds,
+            )
+        except (TimeoutError, httpx.TimeoutException) as exc:
+            error = IntegrationRequestError(
+                f"NVIDIA direct request timed out after {timeout_seconds:.1f}s "
+                f"for model {model}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.timeout,
+            )
+            self._log_request_error(
+                error,
+                operation=operation,
+                trace_id=trace_id,
+                model=model,
+            )
+            raise error from exc
+        except httpx.HTTPError as exc:
+            diagnostics = exception_diagnostics(exc)
+            error = IntegrationRequestError(
+                f"NVIDIA direct request failed for model {model}: "
+                f"{diagnostics.error_message}",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                status_code=diagnostics.status_code,
+                response_body=diagnostics.response_body,
+                failure_category=IntegrationFailureCategory.connectivity,
+            )
+            self._log_request_error(
+                error,
+                operation=operation,
+                trace_id=trace_id,
+                model=model,
+            )
+            raise error from exc
+        return self._response_data(
+            response,
+            model=model,
+            operation=operation,
+            trace_id=trace_id,
+        )
+
+    @staticmethod
+    def _http_timeout(timeout_seconds: float) -> httpx.Timeout:
+        return httpx.Timeout(
+            timeout_seconds,
+            connect=min(10.0, timeout_seconds),
+            read=timeout_seconds,
+            write=min(10.0, timeout_seconds),
+            pool=min(10.0, timeout_seconds),
+        )
+
+    @staticmethod
+    def _response_data(
+        response: httpx.Response,
+        *,
+        model: str,
+        operation: str,
+        trace_id: str | None,
+    ) -> dict[str, Any]:
+        response_body = compact_log_text(response.text, limit=2_000)
+        if response.status_code >= 400:
+            logger.warning(
+                "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
+                "status_code=%s response_body=%s",
+                operation,
+                trace_id,
+                model,
+                response.status_code,
+                response_body,
+            )
+            raise IntegrationRequestError(
+                f"NVIDIA direct request failed for model {model}: HTTP {response.status_code}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                status_code=response.status_code,
+                response_body=response.text,
+                failure_category=(
+                    IntegrationFailureCategory.rate_limit
+                    if response.status_code == 429
+                    else IntegrationFailureCategory.http_error
+                ),
+            )
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            raise IntegrationRequestError(
+                f"NVIDIA direct returned a non-JSON HTTP response for model {model}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                status_code=response.status_code,
+                response_body=response.text,
+                failure_category=IntegrationFailureCategory.invalid_response,
+            ) from exc
+        if not isinstance(data, dict):
+            raise IntegrationRequestError(
+                f"NVIDIA direct returned an invalid response shape for model {model}.",
+                provider="NVIDIA",
+                model=model,
+                operation=operation,
+                failure_category=IntegrationFailureCategory.invalid_response,
+            )
+        return data
+
+    @staticmethod
+    def _log_request_error(
+        error: Exception,
+        *,
+        operation: str,
+        trace_id: str | None,
+        model: str,
+    ) -> None:
+        diagnostics = exception_diagnostics(error)
+        logger.warning(
+            "NVIDIA direct request failed operation=%s trace_id=%s model=%s "
+            "error_type=%s error_message=%s status_code=%s response_body=%s",
+            operation,
+            trace_id,
+            model,
+            diagnostics.error_type,
+            diagnostics.error_message,
+            diagnostics.status_code,
+            diagnostics.response_body,
+        )
 
     def _extract_response_text(self, data: dict[str, Any], *, model: str) -> str:
         choices = data.get("choices")

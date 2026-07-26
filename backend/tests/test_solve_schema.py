@@ -3,7 +3,12 @@ import pytest
 from app.schemas.common import Difficulty, ProblemType
 from app.schemas.solve import SolveAnswer, SolvePart, SolveStep
 from app.services.fallback_solver import FallbackSolver
-from app.services.solver_service import SolverService
+from app.services.solver_pipeline.response_builder import (
+    draft_from_payload,
+    fallback_draft_for_subquestions,
+)
+from app.services.solver_pipeline.routing import without_backend_config_warnings
+from app.services.solver_pipeline.subquestion import detect_subquestions
 
 
 def test_solve_step_coerces_model_string_shape_mistakes() -> None:
@@ -69,10 +74,8 @@ def test_solve_part_coerces_label_and_question() -> None:
     assert part.question == "Prove the cyclic quadrilateral."
 
 
-def test_solver_service_detects_and_normalizes_subquestions() -> None:
-    service = SolverService.__new__(SolverService)
-
-    subquestions = service._detect_subquestions(
+def test_detects_and_normalizes_subquestions() -> None:
+    subquestions = detect_subquestions(
         "Given a triangle.\n1) First proof.\nii) Second proof.\n(c) Third proof."
     )
 
@@ -84,11 +87,10 @@ def test_solver_service_detects_and_normalizes_subquestions() -> None:
     ]
 
 
-def test_solver_service_normalizes_model_parts_to_expected_subquestions() -> None:
-    service = SolverService.__new__(SolverService)
-    subquestions = service._detect_subquestions("1) First task.\n2) Second task.")
+def test_normalizes_model_parts_to_expected_subquestions() -> None:
+    subquestions = detect_subquestions("1) First task.\n2) Second task.")
 
-    draft = service._draft_from_payload(
+    draft = draft_from_payload(
         {
             "answer": {"text": "Both parts are solved."},
             "steps": [
@@ -133,12 +135,11 @@ def test_solver_service_normalizes_model_parts_to_expected_subquestions() -> Non
     assert [part.steps[0].index for part in draft.parts] == [1, 1]
 
 
-def test_solver_service_rejects_too_concise_proof_parts() -> None:
-    service = SolverService.__new__(SolverService)
-    subquestions = service._detect_subquestions("1) Prove first.\n2) Prove second.")
+def test_rejects_too_concise_proof_parts() -> None:
+    subquestions = detect_subquestions("1) Prove first.\n2) Prove second.")
 
     with pytest.raises(ValueError, match="too few steps"):
-        service._draft_from_payload(
+        draft_from_payload(
             {
                 "answer": {"text": "Both parts are solved."},
                 "steps": [
@@ -177,16 +178,17 @@ def test_solver_service_rejects_too_concise_proof_parts() -> None:
         )
 
 
-def test_solver_service_fallback_builds_steps_for_each_subquestion() -> None:
-    service = SolverService.__new__(SolverService)
-    service.fallback_solver = FallbackSolver()
-    subquestions = service._detect_subquestions("1) 2x + 5 = 17\n2) 3x - 6 = 0")
+def test_fallback_builds_steps_for_each_subquestion() -> None:
+    fallback_solver = FallbackSolver()
+    subquestions = detect_subquestions("1) 2x + 5 = 17\n2) 3x - 6 = 0")
 
-    draft = service._fallback_draft_for_subquestions(
+    draft = fallback_draft_for_subquestions(
+        fallback_solver=fallback_solver,
         text="1) 2x + 5 = 17\n2) 3x - 6 = 0",
         problem_type=ProblemType.algebra,
         difficulty=Difficulty.easy,
         subquestions=subquestions,
+        warning_filter=without_backend_config_warnings,
     )
 
     assert [part.label for part in draft.parts] == ["a", "b"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.model_policy import SolveRoute
 from app.integrations.llama_client import LlamaClient
 from app.schemas.common import Difficulty, ProblemType
 from app.services.exact_solver import ExactSolveResult, try_solve_exact
@@ -14,7 +15,6 @@ from app.services.llama_trivia_solver import (
     trivia_result_to_local_solve_result,
 )
 from app.services.local_solver_types import LocalSolveResult
-from app.services.model_router import SolveRoute
 
 LOCAL_SOLVER_MIN_CONFIDENCE = 0.70
 UNSUPPORTED_LOCAL_SOLVER_MARKER = "outside the local deterministic solver"

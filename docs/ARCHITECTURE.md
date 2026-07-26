@@ -88,13 +88,13 @@ flowchart TD
 ### Service layer
 
 - `solver_service.py`
-  - session-free solver facade
-  - OCR
-  - routing
-  - solving
-  - visualization extraction
-  - translation
-  - response caching
+  - session-free dependency facade and structured-solve implementation
+- `solver_pipeline/orchestration.py`
+  - readable request flow, cache/single-flight coordination, visualization, response assembly, and persistence hand-off
+- `core/model_policy.py`
+  - shared model names, endpoint order, attempt timeouts, solve routes, and failure labels
+- `core/solve_metrics.py`
+  - request-scoped timing, model-attempt counters, cache status, and one structured summary log
 - `repositories/result_repository.py`
   - best-effort attempt, run, trace ID, and timing persistence
   - creates, rolls back, and closes a synchronous session inside one worker thread
@@ -123,6 +123,29 @@ flowchart TD
   - deterministic execution for AI-selected arithmetic/algebra shapes and last-resort solve fallback
 - `cache.py`
   - in-memory TTL response cache
+
+### Final `POST /api/v1/solve` path
+
+The endpoint resolves one `SolverService` from FastAPI dependencies and calls
+`service.solve()`. The final backend path is:
+
+1. Allocate a request ID, deadline, and request-scoped metrics collector.
+2. Validate bounded text/image input and run OCR when image bytes exist.
+3. Build the response-cache key. Return a copied cache hit immediately, or join
+   the per-key single-flight so concurrent identical misses share one computation.
+4. Try the deterministic exact solver before any model call.
+5. If exact solving declines, run the unified local router, then the selected
+   local solver or one bounded structured-solve endpoint sequence.
+6. When requested and routed, extract validated visualization DSL and translate
+   it deterministically to GeoGebra commands. Visualization failure stays fail-open.
+7. Assemble the unchanged `SolveResponse`, cache usable responses, and
+   best-effort persist the result.
+8. Emit one JSON `solve_metrics` log with total, OCR, routing, solver,
+   visualization, and persistence duration; cache/single-flight status; total
+   model calls; and provider/model/operation attempt counts.
+
+The application remains one FastAPI monolith. The modules above are internal
+boundaries, not separately deployed services.
 
 ## Routing architecture
 

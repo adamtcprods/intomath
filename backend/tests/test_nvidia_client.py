@@ -6,12 +6,12 @@ from typing import Any
 import httpx
 import pytest
 
-from app.integrations.errors import IntegrationRequestError
-from app.integrations.nvidia_client import NvidiaClient
-from app.services.model_router import (
+from app.core.model_policy import (
     NVIDIA_GPT_OSS_20B_MODEL,
     NVIDIA_GPT_OSS_120B_MODEL,
 )
+from app.integrations.errors import IntegrationRequestError
+from app.integrations.nvidia_client import NvidiaClient
 
 
 def _settings() -> SimpleNamespace:

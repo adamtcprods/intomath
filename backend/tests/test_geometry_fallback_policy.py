@@ -3,6 +3,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
+from app.core.model_policy import EASY_MODEL, HARD_MODEL
 from app.integrations.errors import (
     IntegrationFailureCategory,
     IntegrationRequestError,
@@ -17,7 +18,6 @@ from app.services.geometry_extractor import (
     GeometryOperation,
     GeometryProvider,
 )
-from app.services.model_router import EASY_MODEL, HARD_MODEL
 
 
 def _settings() -> SimpleNamespace:

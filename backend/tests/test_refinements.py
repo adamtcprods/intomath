@@ -163,7 +163,7 @@ def test_missing_visualization_cache_entry_is_not_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, request.input.text, response) is False
+    assert _cached_response_is_usable(request, response) is False
 
 
 def test_unclassified_missing_visualization_cache_entry_is_not_reusable() -> None:
@@ -188,7 +188,7 @@ def test_unclassified_missing_visualization_cache_entry_is_not_reusable() -> Non
         }
     )
 
-    assert _cached_response_is_usable(request, request.input.text, response) is False
+    assert _cached_response_is_usable(request, response) is False
 
 
 def test_geometry_without_visualization_cache_entry_is_not_reusable() -> None:
@@ -213,7 +213,7 @@ def test_geometry_without_visualization_cache_entry_is_not_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, request.input.text, response) is False
+    assert _cached_response_is_usable(request, response) is False
 
 
 def test_classified_nonvisual_cache_entry_remains_reusable() -> None:
@@ -238,7 +238,7 @@ def test_classified_nonvisual_cache_entry_remains_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, request.input.text, response) is True
+    assert _cached_response_is_usable(request, response) is True
 
 
 def test_health_endpoint_success() -> None:
