@@ -368,6 +368,12 @@ metadata alongside the exact
 `runtime_accepted_environments` plus `runtime_eligible` to every overload.
 Fixture tests do not require network access.
 
+GitHub Actions checks the upstream `main` branch every day in
+`.github/workflows/update-geogebra-catalog.yml`. When its commit changes, the
+workflow regenerates and validates both catalog files, then commits the update
+to this repository. It can also be run manually; select `force` to regenerate
+the catalog at the currently tracked upstream commit.
+
 Safe catalog commands are runtime-eligible automatically; catalog membership
 never overrides the permanent denylist. Exact overload acceptance records live
 in `backend/geogebra_runtime_acceptance.json`. The registry derives acceptance
