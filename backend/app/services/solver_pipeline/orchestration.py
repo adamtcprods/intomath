@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 import uuid
@@ -96,17 +97,15 @@ def _cached_response_is_usable(
     request: SolveRequest,
     response: SolveResponse,
 ) -> bool:
+    if "left unclassified" in response.routing.reason.casefold():
+        return False
     if not request.options.include_visualization:
         return True
     if response.visualization.kind != "none":
         return True
     if response.routing.visualization_environment is not None:
         return False
-    if response.problem_type == "geometry":
-        # Older router results could contradict themselves by classifying a
-        # planar geometry prompt while selecting no visualization environment.
-        return False
-    return "left unclassified" not in response.routing.reason.casefold()
+    return True
 
 
 async def solve_request(
@@ -390,6 +389,29 @@ def _record_single_flight_role(
     )
 
 
+async def _route_semantically(
+    router: object,
+    text: str,
+    *,
+    has_image: bool,
+    language: str | None,
+    visualization_requested: bool,
+) -> RoutingDecision:
+    route_async = getattr(router, "route_async")
+    parameters = inspect.signature(route_async).parameters.values()
+    supports_extra_keywords = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+    parameter_names = {parameter.name for parameter in parameters}
+    kwargs: dict[str, object] = {"has_image": has_image}
+    if supports_extra_keywords or "language" in parameter_names:
+        kwargs["language"] = language
+    if supports_extra_keywords or "visualization_requested" in parameter_names:
+        kwargs["visualization_requested"] = visualization_requested
+    return await route_async(text, **kwargs)
+
+
 async def _compute_solve_response(
     service: SolverService,
     request: SolveRequest,
@@ -415,6 +437,8 @@ async def _compute_solve_response(
             exact_solver(normalized_text) if callable(exact_solver) else None
         )
     if exact_result is not None:
+        if metrics is not None:
+            metrics.routing_source = "exact"
         routing = RoutingDecision(
             problem_type=exact_result.problem_type,
             difficulty=exact_result.difficulty,
@@ -434,8 +458,12 @@ async def _compute_solve_response(
     else:
         execution.stage = "routing"
         with _measure_stage("routing"):
-            routing = await service.router.route_async(
-                normalized_text, has_image=bool(request.input.image_base64)
+            routing = await _route_semantically(
+                service.router,
+                normalized_text,
+                has_image=bool(request.input.image_base64),
+                language=request.input.language,
+                visualization_requested=request.options.include_visualization,
             )
     logger.info(
         "Solve routing request_id=%s problem_type=%s difficulty=%s parser_model=%s "

@@ -30,6 +30,7 @@ from app.services.geometry_extractor import GeometryExtractor
 from app.services.local_solver_selector import LocalSolverSelector
 from app.services.model_router import ModelRouter
 from app.services.ocr_service import OCRService
+from app.services.semantic_router import SemanticRouter
 from app.services.solver_pipeline.content_repair import (
     append_content_quality_warnings,
     log_structured_step_quality,
@@ -61,8 +62,9 @@ _RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(
     max_size=_settings.response_cache_max_size,
 )
 logger = logging.getLogger(__name__)
-_CACHE_RESPONSE_VERSION = 7
+_CACHE_RESPONSE_VERSION = 8
 _VISUALIZATION_PIPELINE_VERSION = "geogebra-catalog-1.4-semantic-retrieval-v4-dimensions"
+_SEMANTIC_ROUTING_POLICY_VERSION = "embedding-independent-axes-v1"
 
 
 class SolverService:
@@ -72,6 +74,7 @@ class SolverService:
         result_repository: ResultRepository | None = None,
         nvidia_client: StructuredCompletionClient | None = None,
         llama_client: LlamaClient | None = None,
+        semantic_router: SemanticRouter | None = None,
         router: ModelRouter | None = None,
         ocr_service: OCRService | None = None,
         geometry_extractor: GeometryExtractor | None = None,
@@ -92,7 +95,12 @@ class SolverService:
         self.llama_client = (
             llama_client if llama_client is not None else LlamaClient(self.settings)
         )
-        self.router = router or ModelRouter(self.llama_client)
+        self.semantic_router = semantic_router
+        self.router = router or ModelRouter(
+            self.llama_client,
+            semantic_router=self.semantic_router,
+            settings=self.settings,
+        )
         self.ocr_service = ocr_service or OCRService()
         self.geometry_extractor = geometry_extractor or GeometryExtractor(
             self.llama_client, nvidia_client=self.nvidia_client
@@ -462,6 +470,12 @@ class SolverService:
         payload = {
             "response_version": _CACHE_RESPONSE_VERSION,
             "visualization_pipeline_version": _VISUALIZATION_PIPELINE_VERSION,
+            "semantic_routing_policy_version": _SEMANTIC_ROUTING_POLICY_VERSION,
+            "semantic_router_artifact": (
+                getattr(self, "semantic_router").artifact_identity
+                if getattr(self, "semantic_router", None) is not None
+                else "llm-only"
+            ),
             "catalog_schema_version": registry_metadata.get("schema_version"),
             "catalog_generator_version": registry_metadata.get("generator_version"),
             "catalog_upstream_commit": registry_metadata.get("upstream_commit"),

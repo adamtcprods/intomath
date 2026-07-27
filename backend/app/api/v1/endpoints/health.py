@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -14,15 +14,25 @@ router = APIRouter()
 _API_VERSION = "2.0.0"
 
 
+class SemanticRouterHealth(BaseModel):
+    status: str
+    model_loaded: bool
+    model_path: str | None
+    model_version: str | None
+    load_time_ms: float | None
+    approximate_memory_mb: float | None
+
+
 class HealthResponse(BaseModel):
     status: str
     db: str
     version: str
+    semantic_router: SemanticRouterHealth
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
-    """Return service health including a lightweight DB connectivity probe."""
+async def health_check(request: Request) -> HealthResponse:
+    """Return database and optional process-local semantic-router health."""
     try:
         await asyncio.to_thread(_probe_database)
     except Exception:
@@ -31,10 +41,48 @@ async def health_check() -> HealthResponse:
     else:
         db_status = "ok"
 
+    semantic_health, semantic_degraded = _semantic_router_health(request)
     return HealthResponse(
-        status="ok" if db_status == "ok" else "degraded",
+        status=(
+            "ok"
+            if db_status == "ok" and not semantic_degraded
+            else "degraded"
+        ),
         db=db_status,
         version=_API_VERSION,
+        semantic_router=semantic_health,
+    )
+
+
+def _semantic_router_health(
+    request: Request,
+) -> tuple[SemanticRouterHealth, bool]:
+    clients = getattr(request.app.state, "model_clients", None)
+    semantic_router = getattr(clients, "semantic_router", None)
+    if semantic_router is None:
+        return (
+            SemanticRouterHealth(
+                status="disabled",
+                model_loaded=False,
+                model_path=None,
+                model_version=None,
+                load_time_ms=None,
+                approximate_memory_mb=None,
+            ),
+            False,
+        )
+
+    status = semantic_router.status()
+    return (
+        SemanticRouterHealth(
+            status=status.state,
+            model_loaded=status.state == "ready",
+            model_path=status.model_path or status.model_source,
+            model_version=status.model_version,
+            load_time_ms=status.load_time_ms,
+            approximate_memory_mb=status.approximate_memory_mb,
+        ),
+        status.enabled and status.state == "unavailable",
     )
 
 

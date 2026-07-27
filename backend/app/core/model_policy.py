@@ -32,6 +32,16 @@ class SolveRoute(str, Enum):
     remote = "remote"
 
 
+def derive_non_exact_solve_route() -> SolveRoute:
+    """Use the structured solver unless a separately evaluated policy replaces it.
+
+    The embedding classifier never authorizes deterministic execution. Concept
+    intent is intentionally not inferred until an independent trivia-routing
+    classifier demonstrates value on locked evaluation data.
+    """
+    return SolveRoute.remote
+
+
 class ModelFailureCategory(str, Enum):
     rate_limited = "rate_limited"
     provider_unavailable = "structured_output_provider_unavailable"
@@ -96,6 +106,7 @@ __all__ = [
     "SolveRoute",
     "StructuredModelEndpoint",
     "VISION_MODEL",
+    "derive_non_exact_solve_route",
     "remote_model_timeout_seconds",
     "structured_model_endpoints",
 ]

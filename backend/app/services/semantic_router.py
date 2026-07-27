@@ -110,6 +110,7 @@ class SemanticAbstention:
     used_fallback: bool
     language: str
     latency_ms: float
+    inference_performed: bool = False
 
 
 SemanticRouterResult = SemanticClassification | SemanticAbstention
@@ -297,7 +298,12 @@ class SemanticRouter:
                 )
             )
         except Exception:
-            return self._abstain("embedding_error", language_label, started)
+            return self._abstain(
+                "embedding_error",
+                language_label,
+                started,
+                inference_performed=True,
+            )
 
         score_map = dict(axis_scores)
         nearest_similarity = score_map["problem_type"].raw_similarity
@@ -311,6 +317,7 @@ class SemanticRouter:
                 language_label,
                 started,
                 model_name=backend.model_name,
+                inference_performed=True,
             )
 
         confident_axes = frozenset(
@@ -499,6 +506,7 @@ class SemanticRouter:
         started: float,
         *,
         model_name: str | None = None,
+        inference_performed: bool = False,
     ) -> SemanticAbstention:
         return SemanticAbstention(
             reason=reason,
@@ -506,6 +514,7 @@ class SemanticRouter:
             used_fallback=False,
             language=language,
             latency_ms=(time.monotonic() - started) * 1000.0,
+            inference_performed=inference_performed,
         )
 
 

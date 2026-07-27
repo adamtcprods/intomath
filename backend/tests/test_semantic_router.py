@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from typing import Sequence
 
 import pytest
+from fastapi import FastAPI
+from starlette.requests import Request
 
+from app.api.v1.endpoints.health import _semantic_router_health
 from app.semantic_router.contracts import AXIS_LABELS
 from app.semantic_router.prototypes import (
     PrototypeArtifact,
@@ -363,3 +366,48 @@ def test_embedding_classification_performs_no_network_call(
 
     assert isinstance(result, SemanticClassification)
     assert result.problem_type.value == "probability"
+
+
+def _health_request(router: SemanticRouter) -> Request:
+    app = FastAPI()
+    app.state.model_clients = SimpleNamespace(semantic_router=router)
+    return Request({"type": "http", "app": app})
+
+
+def test_health_reports_ready_unavailable_and_disabled_states() -> None:
+    vector = _query("geometry", "medium", "geometry_2d")
+    ready_router, _, _ = _router({"ready": vector})
+    ready_router.classify("ready")
+    ready, ready_degraded = _semantic_router_health(_health_request(ready_router))
+
+    def unavailable(_: str, __: str) -> FakeEmbeddingBackend:
+        raise RuntimeError("missing")
+
+    unavailable_router = SemanticRouter(
+        _settings(),
+        backend_factory=unavailable,
+        prototype_artifact=_artifact(),
+    )
+    unavailable_router.initialize()
+    missing, missing_degraded = _semantic_router_health(
+        _health_request(unavailable_router)
+    )
+
+    disabled_router = SemanticRouter(
+        _settings(semantic_router_enabled=False),
+        prototype_artifact=_artifact(),
+    )
+    disabled, disabled_degraded = _semantic_router_health(
+        _health_request(disabled_router)
+    )
+
+    assert ready.status == "ready"
+    assert ready.model_loaded is True
+    assert ready.model_path == "fake-multilingual-model"
+    assert ready.model_version
+    assert ready_degraded is False
+    assert missing.status == "unavailable"
+    assert missing.model_loaded is False
+    assert missing_degraded is True
+    assert disabled.status == "disabled"
+    assert disabled_degraded is False
