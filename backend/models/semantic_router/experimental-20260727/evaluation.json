@@ -1,0 +1,1173 @@
+{
+  "base_model": {
+    "name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "performance": {
+      "approximate_memory_mb": 670.52734375,
+      "cold_embedding_latency_ms": 11.732650000340072,
+      "device": "cpu",
+      "model_load_time_ms": 1128.137666000839,
+      "model_parameter_memory_mb": 448.8134765625,
+      "peak_process_rss_mb": 1631.77734375,
+      "warm_latency_ms": 12.276707799992437
+    },
+    "test": {
+      "abstention_rate": 0.9090909090909091,
+      "accuracy_by_language": {
+        "en": 0.2727272727272727,
+        "mixed": 0.09090909090909091,
+        "vi": 0.2727272727272727
+      },
+      "accuracy_by_problem_type": {
+        "algebra": 0.0,
+        "arithmetic": 0.0,
+        "calculus": 0.6666666666666666,
+        "general": 0.3333333333333333,
+        "geometry": 1.0,
+        "number_theory": 0.3333333333333333,
+        "probability": 0.6666666666666666,
+        "statistics": 0.5,
+        "trigonometry": 0.6666666666666666
+      },
+      "accuracy_by_visualization_environment": {
+        "cas": 0.5,
+        "geometry_2d": 1.0,
+        "graphics_3d": 0.3333333333333333,
+        "graphing": 0.6666666666666666,
+        "none": 0.3333333333333333,
+        "probability": 0.3333333333333333,
+        "spreadsheet": 0.0,
+        "statistics": 0.6666666666666666
+      },
+      "axes": {
+        "difficulty": {
+          "accuracy": 0.42424242424242425,
+          "confusion_matrix": {
+            "easy": {
+              "easy": 0,
+              "hard": 0,
+              "medium": 0
+            },
+            "hard": {
+              "easy": 3,
+              "hard": 4,
+              "medium": 8
+            },
+            "medium": {
+              "easy": 6,
+              "hard": 2,
+              "medium": 10
+            }
+          },
+          "f1_by_label": {
+            "easy": 0.0,
+            "hard": 0.3809523809523809,
+            "medium": 0.5555555555555556
+          },
+          "macro_f1": 0.31216931216931215
+        },
+        "problem_type": {
+          "accuracy": 0.48484848484848486,
+          "confusion_matrix": {
+            "algebra": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 3,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "arithmetic": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 3,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "calculus": {
+              "algebra": 1,
+              "arithmetic": 0,
+              "calculus": 2,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "general": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 1,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 2,
+              "trigonometry": 0
+            },
+            "geometry": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 3,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "number_theory": {
+              "algebra": 2,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 1,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "probability": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 1,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 4,
+              "statistics": 1,
+              "trigonometry": 0
+            },
+            "statistics": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 2,
+              "number_theory": 0,
+              "probability": 1,
+              "statistics": 3,
+              "trigonometry": 0
+            },
+            "trigonometry": {
+              "algebra": 1,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 2
+            }
+          },
+          "f1_by_label": {
+            "algebra": 0.0,
+            "arithmetic": 0.0,
+            "calculus": 0.8,
+            "general": 0.4,
+            "geometry": 0.7499999999999999,
+            "number_theory": 0.2,
+            "probability": 0.7272727272727272,
+            "statistics": 0.5,
+            "trigonometry": 0.8
+          },
+          "macro_f1": 0.4641414141414141
+        },
+        "visualization_environment": {
+          "accuracy": 0.45454545454545453,
+          "confusion_matrix": {
+            "cas": {
+              "cas": 3,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 3,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "geometry_2d": {
+              "cas": 0,
+              "geometry_2d": 3,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphics_3d": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 1,
+              "graphing": 2,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphing": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 1,
+              "graphing": 2,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "none": {
+              "cas": 2,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 1,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "probability": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 2,
+              "probability": 1,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "spreadsheet": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 3,
+              "none": 0,
+              "probability": 3,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "statistics": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 1,
+              "none": 0,
+              "probability": 1,
+              "spreadsheet": 0,
+              "statistics": 4
+            }
+          },
+          "f1_by_label": {
+            "cas": 0.5454545454545454,
+            "geometry_2d": 1.0,
+            "graphics_3d": 0.4,
+            "graphing": 0.36363636363636365,
+            "none": 0.2222222222222222,
+            "probability": 0.25,
+            "spreadsheet": 0.0,
+            "statistics": 0.8
+          },
+          "macro_f1": 0.4476641414141414
+        }
+      },
+      "chosen_coverage": 0.7,
+      "coverage": 0.09090909090909091,
+      "in_scope_examples": 33,
+      "joint_problem_visualization_accuracy": 0.21212121212121213,
+      "llm_fallback_rate": 0.9166666666666666,
+      "ood_false_reject_rate": 0.0,
+      "ood_recall": 1.0,
+      "out_of_scope_examples": 3,
+      "realized_chosen_coverage": 0.7272727272727273,
+      "selective_accuracy": 1.0,
+      "selective_accuracy_at_chosen_coverage": 0.2916666666666667,
+      "total_examples": 36
+    },
+    "validation": {
+      "abstention_rate": 1.0,
+      "accuracy_by_language": {
+        "en": 0.2727272727272727,
+        "mixed": 0.2727272727272727,
+        "vi": 0.09090909090909091
+      },
+      "accuracy_by_problem_type": {
+        "algebra": 0.0,
+        "arithmetic": 0.0,
+        "calculus": 0.5,
+        "general": 0.0,
+        "geometry": 1.0,
+        "number_theory": 0.0,
+        "probability": 0.0,
+        "statistics": 1.0,
+        "trigonometry": 0.3333333333333333
+      },
+      "accuracy_by_visualization_environment": {
+        "cas": 0.6666666666666666,
+        "geometry_2d": 0.3333333333333333,
+        "graphics_3d": 0.3333333333333333,
+        "graphing": 1.0,
+        "none": 0.6666666666666666,
+        "probability": 0.0,
+        "spreadsheet": 0.3333333333333333,
+        "statistics": 1.0
+      },
+      "axes": {
+        "difficulty": {
+          "accuracy": 0.42424242424242425,
+          "confusion_matrix": {
+            "easy": {
+              "easy": 3,
+              "hard": 0,
+              "medium": 6
+            },
+            "hard": {
+              "easy": 0,
+              "hard": 2,
+              "medium": 4
+            },
+            "medium": {
+              "easy": 4,
+              "hard": 5,
+              "medium": 9
+            }
+          },
+          "f1_by_label": {
+            "easy": 0.375,
+            "hard": 0.30769230769230765,
+            "medium": 0.4864864864864865
+          },
+          "macro_f1": 0.3897262647262647
+        },
+        "problem_type": {
+          "accuracy": 0.42424242424242425,
+          "confusion_matrix": {
+            "algebra": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 3,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "arithmetic": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 2,
+              "probability": 1,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "calculus": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 3,
+              "general": 0,
+              "geometry": 3,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "general": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "geometry": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 6,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "number_theory": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 3
+            },
+            "probability": {
+              "algebra": 3,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "statistics": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 3,
+              "trigonometry": 0
+            },
+            "trigonometry": {
+              "algebra": 1,
+              "arithmetic": 0,
+              "calculus": 2,
+              "general": 0,
+              "geometry": 1,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 2
+            }
+          },
+          "f1_by_label": {
+            "algebra": 0.0,
+            "arithmetic": 0.0,
+            "calculus": 0.42857142857142855,
+            "general": 0.0,
+            "geometry": 0.7499999999999999,
+            "number_theory": 0.0,
+            "probability": 0.0,
+            "statistics": 1.0,
+            "trigonometry": 0.3636363636363636
+          },
+          "macro_f1": 0.2824675324675325
+        },
+        "visualization_environment": {
+          "accuracy": 0.5454545454545454,
+          "confusion_matrix": {
+            "cas": {
+              "cas": 2,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 1,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "geometry_2d": {
+              "cas": 0,
+              "geometry_2d": 1,
+              "graphics_3d": 0,
+              "graphing": 2,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphics_3d": {
+              "cas": 0,
+              "geometry_2d": 2,
+              "graphics_3d": 1,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphing": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 3,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "none": {
+              "cas": 0,
+              "geometry_2d": 3,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 6,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "probability": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 3,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "spreadsheet": {
+              "cas": 2,
+              "geometry_2d": 1,
+              "graphics_3d": 0,
+              "graphing": 1,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 2,
+              "statistics": 0
+            },
+            "statistics": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 3
+            }
+          },
+          "f1_by_label": {
+            "cas": 0.5714285714285715,
+            "geometry_2d": 0.2,
+            "graphics_3d": 0.5,
+            "graphing": 0.5,
+            "none": 0.75,
+            "probability": 0.0,
+            "spreadsheet": 0.5,
+            "statistics": 1.0
+          },
+          "macro_f1": 0.5026785714285714
+        }
+      },
+      "chosen_coverage": 0.7,
+      "coverage": 0.0,
+      "in_scope_examples": 33,
+      "joint_problem_visualization_accuracy": 0.21212121212121213,
+      "llm_fallback_rate": 1.0,
+      "ood_false_reject_rate": 0.0,
+      "ood_recall": 1.0,
+      "out_of_scope_examples": 3,
+      "realized_chosen_coverage": 0.7272727272727273,
+      "selective_accuracy": 0.0,
+      "selective_accuracy_at_chosen_coverage": 0.2916666666666667,
+      "total_examples": 36
+    }
+  },
+  "data_hash": "2b62efc73713eaf316371cc57a2aa4da044ecf78106e83b51990043387b7172c",
+  "dataset_warning": "This run used a small starter corpus whose rows require human review. Metrics are not production accuracy claims.",
+  "fine_tuned": {
+    "performance": {
+      "approximate_memory_mb": 670.52734375,
+      "device": "cpu",
+      "model_parameter_memory_mb": 448.8134765625,
+      "peak_process_rss_mb": 6793.3984375,
+      "warm_latency_ms": 10.5743827999504
+    },
+    "test": {
+      "abstention_rate": 0.8484848484848485,
+      "accuracy_by_language": {
+        "en": 0.2727272727272727,
+        "mixed": 0.2727272727272727,
+        "vi": 0.18181818181818182
+      },
+      "accuracy_by_problem_type": {
+        "algebra": 1.0,
+        "arithmetic": 0.0,
+        "calculus": 1.0,
+        "general": 0.0,
+        "geometry": 1.0,
+        "number_theory": 0.0,
+        "probability": 0.5,
+        "statistics": 0.5,
+        "trigonometry": 1.0
+      },
+      "accuracy_by_visualization_environment": {
+        "cas": 0.5,
+        "geometry_2d": 1.0,
+        "graphics_3d": 0.0,
+        "graphing": 0.6666666666666666,
+        "none": 0.0,
+        "probability": 0.0,
+        "spreadsheet": 0.5,
+        "statistics": 0.8333333333333334
+      },
+      "axes": {
+        "difficulty": {
+          "accuracy": 0.48484848484848486,
+          "confusion_matrix": {
+            "easy": {
+              "easy": 0,
+              "hard": 0,
+              "medium": 0
+            },
+            "hard": {
+              "easy": 3,
+              "hard": 4,
+              "medium": 8
+            },
+            "medium": {
+              "easy": 5,
+              "hard": 1,
+              "medium": 12
+            }
+          },
+          "f1_by_label": {
+            "easy": 0.0,
+            "hard": 0.4,
+            "medium": 0.631578947368421
+          },
+          "macro_f1": 0.34385964912280703
+        },
+        "problem_type": {
+          "accuracy": 0.5454545454545454,
+          "confusion_matrix": {
+            "algebra": {
+              "algebra": 3,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "arithmetic": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 3,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "calculus": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 3,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "general": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 3,
+              "trigonometry": 0
+            },
+            "geometry": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 3,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "number_theory": {
+              "algebra": 3,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "probability": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 2,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 3,
+              "statistics": 1,
+              "trigonometry": 0
+            },
+            "statistics": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 3,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 3,
+              "trigonometry": 0
+            },
+            "trigonometry": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 3
+            }
+          },
+          "f1_by_label": {
+            "algebra": 0.6666666666666666,
+            "arithmetic": 0.0,
+            "calculus": 1.0,
+            "general": 0.0,
+            "geometry": 0.6666666666666666,
+            "number_theory": 0.0,
+            "probability": 0.6666666666666666,
+            "statistics": 0.4615384615384615,
+            "trigonometry": 1.0
+          },
+          "macro_f1": 0.49572649572649574
+        },
+        "visualization_environment": {
+          "accuracy": 0.48484848484848486,
+          "confusion_matrix": {
+            "cas": {
+              "cas": 3,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 3,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "geometry_2d": {
+              "cas": 0,
+              "geometry_2d": 3,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphics_3d": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 3,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphing": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 1,
+              "graphing": 2,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "none": {
+              "cas": 3,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "probability": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 3,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "spreadsheet": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 1,
+              "probability": 1,
+              "spreadsheet": 3,
+              "statistics": 1
+            },
+            "statistics": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 1,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 5
+            }
+          },
+          "f1_by_label": {
+            "cas": 0.5,
+            "geometry_2d": 1.0,
+            "graphics_3d": 0.0,
+            "graphing": 0.5,
+            "none": 0.0,
+            "probability": 0.0,
+            "spreadsheet": 0.6666666666666666,
+            "statistics": 0.8333333333333334
+          },
+          "macro_f1": 0.4375
+        }
+      },
+      "chosen_coverage": 0.7,
+      "coverage": 0.15151515151515152,
+      "in_scope_examples": 33,
+      "joint_problem_visualization_accuracy": 0.24242424242424243,
+      "llm_fallback_rate": 0.8611111111111112,
+      "ood_false_reject_rate": 0.0,
+      "ood_recall": 1.0,
+      "out_of_scope_examples": 3,
+      "realized_chosen_coverage": 0.7272727272727273,
+      "selective_accuracy": 0.6,
+      "selective_accuracy_at_chosen_coverage": 0.2916666666666667,
+      "total_examples": 36
+    },
+    "training_time_seconds": 191.86717043800127,
+    "validation": {
+      "abstention_rate": 1.0,
+      "accuracy_by_language": {
+        "en": 0.2727272727272727,
+        "mixed": 0.2727272727272727,
+        "vi": 0.18181818181818182
+      },
+      "accuracy_by_problem_type": {
+        "algebra": 0.0,
+        "arithmetic": 0.0,
+        "calculus": 0.5,
+        "general": 0.0,
+        "geometry": 1.0,
+        "number_theory": 0.0,
+        "probability": 0.0,
+        "statistics": 1.0,
+        "trigonometry": 0.3333333333333333
+      },
+      "accuracy_by_visualization_environment": {
+        "cas": 0.3333333333333333,
+        "geometry_2d": 1.0,
+        "graphics_3d": 0.0,
+        "graphing": 1.0,
+        "none": 0.7777777777777778,
+        "probability": 1.0,
+        "spreadsheet": 0.3333333333333333,
+        "statistics": 1.0
+      },
+      "axes": {
+        "difficulty": {
+          "accuracy": 0.42424242424242425,
+          "confusion_matrix": {
+            "easy": {
+              "easy": 4,
+              "hard": 0,
+              "medium": 5
+            },
+            "hard": {
+              "easy": 0,
+              "hard": 2,
+              "medium": 4
+            },
+            "medium": {
+              "easy": 4,
+              "hard": 6,
+              "medium": 8
+            }
+          },
+          "f1_by_label": {
+            "easy": 0.47058823529411764,
+            "hard": 0.28571428571428575,
+            "medium": 0.45714285714285713
+          },
+          "macro_f1": 0.4044817927170869
+        },
+        "problem_type": {
+          "accuracy": 0.42424242424242425,
+          "confusion_matrix": {
+            "algebra": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 3,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "arithmetic": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 2,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 1,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "calculus": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 3,
+              "general": 1,
+              "geometry": 2,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "general": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "geometry": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 6,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "number_theory": {
+              "algebra": 0,
+              "arithmetic": 3,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "probability": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 3,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 0
+            },
+            "statistics": {
+              "algebra": 0,
+              "arithmetic": 0,
+              "calculus": 0,
+              "general": 0,
+              "geometry": 0,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 3,
+              "trigonometry": 0
+            },
+            "trigonometry": {
+              "algebra": 1,
+              "arithmetic": 0,
+              "calculus": 2,
+              "general": 0,
+              "geometry": 1,
+              "number_theory": 0,
+              "probability": 0,
+              "statistics": 0,
+              "trigonometry": 2
+            }
+          },
+          "f1_by_label": {
+            "algebra": 0.0,
+            "arithmetic": 0.0,
+            "calculus": 0.42857142857142855,
+            "general": 0.0,
+            "geometry": 0.8,
+            "number_theory": 0.0,
+            "probability": 0.0,
+            "statistics": 1.0,
+            "trigonometry": 0.5
+          },
+          "macro_f1": 0.3031746031746032
+        },
+        "visualization_environment": {
+          "accuracy": 0.6666666666666666,
+          "confusion_matrix": {
+            "cas": {
+              "cas": 1,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 2,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "geometry_2d": {
+              "cas": 0,
+              "geometry_2d": 3,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphics_3d": {
+              "cas": 0,
+              "geometry_2d": 3,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "graphing": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 3,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "none": {
+              "cas": 0,
+              "geometry_2d": 2,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 7,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "probability": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 3,
+              "spreadsheet": 0,
+              "statistics": 0
+            },
+            "spreadsheet": {
+              "cas": 2,
+              "geometry_2d": 1,
+              "graphics_3d": 0,
+              "graphing": 1,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 2,
+              "statistics": 0
+            },
+            "statistics": {
+              "cas": 0,
+              "geometry_2d": 0,
+              "graphics_3d": 0,
+              "graphing": 0,
+              "none": 0,
+              "probability": 0,
+              "spreadsheet": 0,
+              "statistics": 3
+            }
+          },
+          "f1_by_label": {
+            "cas": 0.3333333333333333,
+            "geometry_2d": 0.5,
+            "graphics_3d": 0.0,
+            "graphing": 0.6666666666666666,
+            "none": 0.8750000000000001,
+            "probability": 1.0,
+            "spreadsheet": 0.5,
+            "statistics": 1.0
+          },
+          "macro_f1": 0.609375
+        }
+      },
+      "chosen_coverage": 0.7,
+      "coverage": 0.0,
+      "in_scope_examples": 33,
+      "joint_problem_visualization_accuracy": 0.24242424242424243,
+      "llm_fallback_rate": 1.0,
+      "ood_false_reject_rate": 0.0,
+      "ood_recall": 1.0,
+      "out_of_scope_examples": 3,
+      "realized_chosen_coverage": 0.7272727272727273,
+      "selective_accuracy": 0.0,
+      "selective_accuracy_at_chosen_coverage": 0.25,
+      "total_examples": 36
+    }
+  },
+  "fine_tuning_date": "2026-07-27T04:27:13.726443+00:00",
+  "promotion": {
+    "decision": "keep_base_model",
+    "latency_ratio": 0.8613370108847026,
+    "maximum_latency_ratio": 1.2,
+    "maximum_memory_ratio": 1.15,
+    "memory_ratio": 1.0,
+    "promoted": false,
+    "quality_checks": {
+      "english_accuracy": false,
+      "mixed_language_accuracy": true,
+      "problem_type_macro_f1": true,
+      "selective_accuracy_at_chosen_coverage": false,
+      "vietnamese_accuracy": false,
+      "visualization_environment_macro_f1": false
+    },
+    "resource_checks": {
+      "latency_ratio_acceptable": true,
+      "memory_ratio_acceptable": true
+    },
+    "runtime_configuration_changed": false
+  },
+  "report_version": "1.0"
+}
