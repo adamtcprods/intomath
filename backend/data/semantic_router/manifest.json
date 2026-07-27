@@ -1,0 +1,54 @@
+{
+  "data_hash": "2b62efc73713eaf316371cc57a2aa4da044ecf78106e83b51990043387b7172c",
+  "difficulties": {
+    "easy": 54,
+    "hard": 57,
+    "medium": 105
+  },
+  "groups": {
+    "test": 12,
+    "train": 48,
+    "validation": 12
+  },
+  "in_scope": 210,
+  "languages": {
+    "en": 72,
+    "mixed": 72,
+    "vi": 72
+  },
+  "out_of_scope": 6,
+  "problem_types": {
+    "algebra": 24,
+    "arithmetic": 24,
+    "calculus": 24,
+    "general": 24,
+    "geometry": 24,
+    "number_theory": 24,
+    "probability": 24,
+    "statistics": 24,
+    "trigonometry": 24
+  },
+  "review_statuses": {
+    "needs_review": 216
+  },
+  "schema_version": "1.0",
+  "sizes": {
+    "test": 36,
+    "train": 144,
+    "validation": 36
+  },
+  "sources": {
+    "curated_starter": 216
+  },
+  "status": "non_production_starter_requires_human_review",
+  "visualization_environments": {
+    "cas": 27,
+    "geometry_2d": 12,
+    "graphics_3d": 12,
+    "graphing": 30,
+    "none": 87,
+    "probability": 12,
+    "spreadsheet": 21,
+    "statistics": 15
+  }
+}

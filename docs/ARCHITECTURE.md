@@ -19,10 +19,15 @@ flowchart TD
     A[User input] --> B[Frontend workspace]
     B --> C[POST /api/v1/solve]
     C --> D[OCR step if image is present]
-    D --> E[Model router]
-    E --> L[Local solver selector]
+    D --> X[Exact deterministic solver attempt]
+    X -->|accepted| J
+    X -->|declined| E[Multilingual embedding router]
+    E -->|uncertain or unavailable| M[LLM classification fallback]
+    E -->|confident| L[Existing solver route]
+    M --> L
     L --> F[Structured solve generation]
     E --> G[Geometry extraction]
+    M --> G
     G --> H[Semantic query expansion + bounded command retrieval]
     H --> I[Typed Geometry DSL 1.1]
     I --> V[Schema + signature + type + dependency validation]
@@ -101,11 +106,16 @@ flowchart TD
 - `alembic/`
   - managed production database schema and revisions
 - `model_router.py`
-  - schema-constrained local-AI classification of subject, difficulty, and visualization environment
-  - explicit unclassified route when the model is unavailable or invalid
+  - embedding-first facade for independent subject, difficulty, and visualization classification
+  - one schema-constrained local-LLM fallback on uncertainty or embedding unavailability
+  - explicit unclassified route if both classifiers are unavailable or invalid
+- `semantic_router.py`
+  - one process-local multilingual sentence-transformer per worker
+  - independent normalized prototype banks, per-axis calibration, and OOD gating
+  - separate nearest-example visualization-term retrieval
 - `local_solver_selector.py`
-  - lets the local llama.cpp model select and normalize a narrow deterministic execution tool
-  - never sends geometry through the pre-model deterministic path
+  - re-parses the original prompt before every deterministic execution
+  - never treats embedding labels or normalization hints as execution authority
 - `ocr_service.py`
   - image-to-structured-text stage through local DeepSeek OCR
 - `geometry_extractor.py`
@@ -120,7 +130,8 @@ flowchart TD
 - `geogebra_validator.py`
   - label/type/environment/allowlist/dependency validation and topological ordering
 - `fallback_solver.py`
-  - deterministic execution for AI-selected arithmetic/algebra shapes and last-resort solve fallback
+  - safe deterministic parsing/evaluation for exactly supported arithmetic and algebra shapes
+  - is never authorized by a semantic embedding label
 - `cache.py`
   - in-memory TTL response cache
 
@@ -133,9 +144,13 @@ The endpoint resolves one `SolverService` from FastAPI dependencies and calls
 2. Validate bounded text/image input and run OCR when image bytes exist.
 3. Build the response-cache key. Return a copied cache hit immediately, or join
    the per-key single-flight so concurrent identical misses share one computation.
-4. Try the deterministic exact solver before any model call.
-5. If exact solving declines, run the unified local router, then the selected
-   local solver or one bounded structured-solve endpoint sequence.
+4. Try the deterministic exact solver against the original prompt before any
+   semantic model call.
+5. If exact solving declines, run the multilingual embedding router once. Use
+   confident problem-type and visualization labels directly; uncertain difficulty
+   becomes `medium`, while uncertainty in a required axis can invoke one retained
+   LLM classification fallback. The selected existing route then performs one
+   bounded structured-solve endpoint sequence.
 6. When requested and routed, extract validated visualization DSL and translate
    it deterministically to GeoGebra commands. Visualization failure stays fail-open.
 7. Assemble the unchanged `SolveResponse`, cache usable responses, and
@@ -149,29 +164,49 @@ boundaries, not separately deployed services.
 
 ## Routing architecture
 
-The local tiny model classifies prompts into:
+After exact parsing declines, the optional multilingual encoder
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` classifies prompts
+against independent prototype banks for:
 
-- `arithmetic`
-- `algebra`
-- `number_theory`
-- `geometry`
-- `trigonometry`
-- `calculus`
-- `statistics`
-- `probability`
-- `general`
+- problem type: `arithmetic`, `algebra`, `number_theory`, `geometry`,
+  `trigonometry`, `calculus`, `statistics`, `probability`, or `general`;
+- difficulty: `easy`, `medium`, or `hard`;
+- visualization: `none`, `geometry_2d`, `graphing`, `graphics_3d`, `cas`,
+  `probability`, `statistics`, or `spreadsheet`.
 
-It selects difficulty and visualization environment in the same constrained JSON
-response. If that response is unavailable or invalid, routing remains explicitly
-`general`/`medium` with no visualization environment; backend keywords do not guess
-the missing classification.
+Each axis has a separately calibrated temperature, confidence, and top-two
+margin. The problem-type nearest-centroid similarity supplies an OOD gate.
+Confident type/visualization with uncertain difficulty uses the safe `medium`
+default without an LLM call. Uncertain required axes, OOD, overlength, invalid
+artifacts, or unavailable local model files can invoke the existing constrained
+llama.cpp classifier once. Labels from the embedding and LLM classifiers are not
+mixed. If fallback is disabled or fails, routing stays explicitly
+`general`/`medium` with no visualization and carries the `left unclassified`
+marker.
+
+The embedding model is loaded once per FastAPI worker during lifespan and only
+from local files or cache. Runtime requests never download model files. Health
+reports disabled/loading/ready/unavailable state, source/path, artifact identity,
+load time, dimensions, prototype count, and approximate memory. Request metrics
+record routing origin, abstention reason, confidence/margin, embedding inference
+count/latency, and LLM fallback count. The checked-in 216-row starter corpus is
+AI-authored and all rows remain `needs_review`; its locked-set measurements are
+not production accuracy claims.
+
+The exact parser is the only authority for deterministic execution. A semantic
+`arithmetic` or `algebra` label selects subject routing, not executable syntax;
+the original prompt must still pass the deterministic grammar. Visualization
+term retrieval is a separate nearest-example lookup and cannot make a
+classification pass.
 
 ### Model policy
 
 | Use case | Model / route |
 |---|---|
-| AI-selected arithmetic, linear equations, and quadratic graph analysis | `local:deterministic-solver`; exact parsing is an execution gate after AI selection |
-| Local semantic routing, normalization, trivia, catalog-query expansion, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
+| Exactly supported arithmetic, linear equations, and quadratic graph analysis | `local:deterministic-solver` before semantic routing |
+| Primary multilingual semantic routing | `paraphrase-multilingual-MiniLM-L12-v2` with local independent prototype banks |
+| Uncertain semantic classification | one constrained `LFM2.5-8B-A1B` llama.cpp fallback |
+| Local trivia and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
 | Easy algebra / arithmetic outside deterministic coverage | `openai/gpt-oss-20b` via NVIDIA NIM |
 | Hard geometry / proofs / multi-step reasoning | `openai/gpt-oss-120b` via NVIDIA NIM |
 | Structured-solve fallback | Preferred NVIDIA gpt-oss model → alternate gpt-oss model, with bounded reasoning and deterministic post-validation |

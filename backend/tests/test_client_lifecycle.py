@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -19,6 +20,22 @@ class FakeNvidiaClient:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class FakeSemanticRouter:
+    artifact_identity = "fake-semantic-artifact"
+
+    def __init__(self) -> None:
+        self.initialize_calls = 0
+
+    async def initialize_async(self) -> SimpleNamespace:
+        self.initialize_calls += 1
+        return SimpleNamespace(
+            enabled=True,
+            state="ready",
+            model_source="fake-embedding",
+            error_category=None,
+        )
 
 
 class FakeLlamaClient:
@@ -43,7 +60,12 @@ def test_lifespan_closes_shared_clients_and_request_services_only_borrow_them(
 ) -> None:
     nvidia = FakeNvidiaClient()
     llama = FakeLlamaClient()
-    shared = SharedModelClients(nvidia=nvidia, llama=llama)  # type: ignore[arg-type]
+    semantic_router = FakeSemanticRouter()
+    shared = SharedModelClients(
+        nvidia=nvidia,
+        llama=llama,
+        semantic_router=semantic_router,  # type: ignore[arg-type]
+    )  # type: ignore[arg-type]
     monkeypatch.setattr(
         main_module,
         "create_shared_model_clients",
@@ -64,6 +86,12 @@ def test_lifespan_closes_shared_clients_and_request_services_only_borrow_them(
         assert isinstance(second_service.result_repository, ResultRepository)
         assert first_service.nvidia_client is second_service.nvidia_client is nvidia
         assert first_service.llama_client is second_service.llama_client is llama
+        assert (
+            first_service.semantic_router
+            is second_service.semantic_router
+            is semantic_router
+        )
+        assert semantic_router.initialize_calls == 1
 
         asyncio.run(first_service.aclose())
         assert nvidia.closed is False

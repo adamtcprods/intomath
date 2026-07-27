@@ -40,8 +40,21 @@ python3 -m venv .venv-local
 
 `backend/pyproject.toml` is the canonical dependency definition.
 `backend/requirements.txt` mirrors only its core runtime dependencies for
-environments that require a requirements file. The large local OCR stack is
-optional; install it only on workers that process images:
+environments that require a requirements file. Install the optional multilingual
+semantic-router runtime only on workers that use it:
+
+```bash
+.venv-local/bin/pip install -e "backend[semantic-router]"
+```
+
+Install the larger training-only stack only for explicit offline experiments:
+
+```bash
+.venv-local/bin/pip install -e "backend[semantic-router-train]"
+```
+
+The large local OCR stack is optional; install it only on workers that process
+images:
 
 ```bash
 .venv-local/bin/pip install -e "backend[ocr-ml]"
@@ -109,6 +122,17 @@ LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS=1.0
 LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS=60.0
 LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS=30.0
 LOCAL_LLAMA_GEOMETRY_MAX_TOKENS=1200
+SEMANTIC_ROUTER_ENABLED=true
+SEMANTIC_ROUTER_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+SEMANTIC_ROUTER_MODEL_PATH=
+SEMANTIC_ROUTER_ARTIFACT_PATH=
+SEMANTIC_ROUTER_DEVICE=cpu
+SEMANTIC_ROUTER_MAX_TEXT_CHARS=4000
+SEMANTIC_ROUTER_MIN_CONFIDENCE=0.60
+SEMANTIC_ROUTER_MIN_MARGIN=0.05
+SEMANTIC_ROUTER_MIN_RAW_SIMILARITY=0.20
+SEMANTIC_ROUTER_TERM_MIN_SIMILARITY=0.55
+SEMANTIC_ROUTER_FALLBACK_TO_LLM=true
 ```
 
 `SOLVE_REQUEST_TIMEOUT_SECONDS` is the wall-clock budget for the complete solve
@@ -200,18 +224,87 @@ consistently:
 
 This starts FastAPI on `http://localhost:8000`.
 
+## Semantic router provisioning and evaluation
+
+The API never downloads sentence-transformer files during startup or a request.
+Provision the base encoder explicitly before enabling it on a worker. For a
+one-time cache download and untouched-base evaluation, run from the repository
+root:
+
+```bash
+.venv-local/bin/python backend/scripts/evaluate_semantic_router.py \
+  --data-dir backend/data/semantic_router \
+  --output-dir /tmp/intomath-semantic-router-base \
+  --allow-download
+```
+
+Without `--allow-download`, evaluation is local-files-only, matching production
+behavior. Set `SEMANTIC_ROUTER_MODEL` to the cached model identifier, or set
+`SEMANTIC_ROUTER_MODEL_PATH` to an exported local `model/` directory and
+`SEMANTIC_ROUTER_ARTIFACT_PATH` to its sibling `prototypes.json`. A configured
+model path takes precedence. The model and prototypes load once per API worker;
+a missing package, model, or invalid artifact marks the router unavailable and
+uses the retained LLM classifier when `SEMANTIC_ROUTER_FALLBACK_TO_LLM=true`.
+
+The checked-in corpus under `backend/data/semantic_router/` has 216 AI-authored
+starter examples: 144 train, 36 validation, and 36 locked test rows. Every row is
+`needs_review`; none is reviewed or production-ready. English, Vietnamese, and
+mixed-language rows are grouped by `group_id`, and every paraphrase/translation
+group stays in one split. Add examples as grouped JSONL rows with unique IDs and
+source IDs, then run the data tests before recalibrating. Do not store user
+prompts as training data without a separate explicit data policy.
+
+Optional experimental fine-tuning uses three independent binary pair streams and
+three separate `CosineSimilarityLoss` objectives—one each for problem type,
+difficulty, and visualization. There is no composite cosine target. The command
+refuses to overwrite an output directory:
+
+```bash
+.venv-local/bin/python backend/scripts/train_semantic_router.py \
+  --data-dir backend/data/semantic_router \
+  --output-dir backend/models/semantic_router/experimental \
+  --base-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+  --seed 42 \
+  --allow-needs-review
+```
+
+`--allow-needs-review` acknowledges that the run is experimental; it does not
+change row review status. Generated `model/`, `prototypes.json`, `metadata.json`,
+and `evaluation.json` files are ignored by Git. The report compares the untouched
+base and tuned model on the locked test split. Promotion requires strict
+improvement in problem-type macro-F1, visualization macro-F1, English,
+Vietnamese, and mixed-language joint accuracy, and selective accuracy at fixed
+70% coverage, with no unacceptable warm-latency or model-memory regression.
+Failure of any gate records `keep_base_model`. Training never changes
+`SEMANTIC_ROUTER_MODEL_PATH`, `SEMANTIC_ROUTER_ARTIFACT_PATH`, or any other runtime
+configuration automatically.
+
+Re-evaluate any exported directory independently with:
+
+```bash
+.venv-local/bin/python backend/scripts/evaluate_semantic_router.py \
+  --data-dir backend/data/semantic_router \
+  --model-dir backend/models/semantic_router/experimental
+```
+
+All starter-set results are development measurements, not production accuracy
+claims. Human review, a larger representative benchmark, and deployment-specific
+latency/memory validation are required before promotion.
+
 ## Solver model configuration
 
 IntoMath expects the following model policy:
 
-- AI-selected deterministic arithmetic/algebra execution: `local:deterministic-solver`
+- exact deterministic arithmetic/algebra execution before semantic routing: `local:deterministic-solver`
+- primary English/Vietnamese/mixed semantic routing: local `paraphrase-multilingual-MiniLM-L12-v2` prototype scoring
+- uncertain or unavailable embedding routing: one constrained local llama.cpp classification fallback
 - easy solving via NVIDIA NIM: `openai/gpt-oss-20b`
 - hard solving via NVIDIA NIM: `openai/gpt-oss-120b`
 - structured-solve NVIDIA fallback: preferred routed gpt-oss model, then its alternate
 - geometry fallback: local llama.cpp, gpt-oss-20b, then gpt-oss-120b when the typed failure policy permits
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
-For local-first routing, normalization, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
+For LLM classification fallback, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
 
 ```bash
 ./llama-server \
@@ -248,12 +341,14 @@ Start the server before the API, restart the API after starting it, or wait for 
 cooldown to expire; a successful request closes the circuit. Geometry continues through
 the validated NVIDIA direct model fallbacks while the circuit is open.
 
-The model proposes problem type, difficulty, visualization environment, and DSL;
-there are no object-name branches that decide 2D versus 3D. Deterministic code
-remains the trust boundary: it rejects unsupported normalization hints and validates
-labels, dependencies, retrieved command membership, overload argument types,
-environment compatibility, numeric values, expressions, and action count before
-producing GeoGebra commands. Explicit visualization requests may use neutral finite
+The embedding router or its LLM fallback proposes problem type, difficulty, and
+visualization environment; the visualization model proposes DSL. There are no
+object-name branches that decide 2D versus 3D. Deterministic code remains the
+trust boundary: embeddings never authorize execution, and the backend rejects
+unsupported normalization hints while validating labels, dependencies, retrieved
+command membership, overload argument types, environment compatibility, numeric
+values, expressions, and action count before producing GeoGebra commands.
+Explicit visualization requests may use neutral finite
 placement/scale defaults solely to make an under-specified object visible. If every
 model-backed extractor is unavailable or invalid, no visualization is generated.
 
@@ -317,7 +412,7 @@ bun run --cwd frontend build
 
 ### Backend
 ```bash
-python3 -m compileall backend/app backend/tests
+python3 -m compileall backend/app backend/tests backend/scripts
 .venv-local/bin/pytest backend/tests
 PYTHONPATH=backend .venv-local/bin/python backend/scripts/evaluate_geogebra_fixtures.py
 ```

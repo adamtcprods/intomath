@@ -191,7 +191,7 @@ def test_unclassified_missing_visualization_cache_entry_is_not_reusable() -> Non
     assert _cached_response_is_usable(request, response) is False
 
 
-def test_geometry_without_visualization_cache_entry_is_not_reusable() -> None:
+def test_independently_nonvisual_geometry_cache_entry_is_reusable() -> None:
     request = SolveRequest.model_validate(
         {"input": {"text": "Prove a geometry theorem."}}
     )
@@ -213,7 +213,7 @@ def test_geometry_without_visualization_cache_entry_is_not_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, response) is False
+    assert _cached_response_is_usable(request, response) is True
 
 
 def test_classified_nonvisual_cache_entry_remains_reusable() -> None:
@@ -249,6 +249,12 @@ def test_health_endpoint_success() -> None:
     assert data["status"] in ("ok", "degraded")
     assert data["db"] in ("ok", "error")
     assert data["version"] == "2.0.0"
+    assert data["semantic_router"]["status"] in {
+        "disabled",
+        "ready",
+        "unavailable",
+    }
+    assert isinstance(data["semantic_router"]["model_loaded"], bool)
 
 
 def test_solve_endpoint_validation_error() -> None:

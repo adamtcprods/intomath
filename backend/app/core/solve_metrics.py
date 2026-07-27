@@ -32,6 +32,13 @@ class SolveMetrics:
     single_flight_role: str | None = None
     outcome: str = "started"
     attempt_counts: Counter[tuple[str, str, str]] = field(default_factory=Counter)
+    routing_source: str | None = None
+    routing_abstention_reason: str | None = None
+    routing_confidence: float | None = None
+    routing_margin: float | None = None
+    semantic_inference_count: int = 0
+    semantic_routing_latency_ms: float = 0.0
+    llm_routing_fallback_count: int = 0
 
     @contextmanager
     def measure(self, stage: str) -> Iterator[None]:
@@ -68,6 +75,15 @@ class SolveMetrics:
             "model_call_count": self.model_call_count,
             "cache_status": self.cache_status,
             "single_flight_role": self.single_flight_role,
+            "routing_source": self.routing_source,
+            "routing_abstention_reason": self.routing_abstention_reason,
+            "routing_confidence": self.routing_confidence,
+            "routing_margin": self.routing_margin,
+            "semantic_inference_count": self.semantic_inference_count,
+            "semantic_routing_latency_ms": round(
+                self.semantic_routing_latency_ms, 3
+            ),
+            "llm_routing_fallback_count": self.llm_routing_fallback_count,
             "attempt_counts": [
                 {
                     "provider": provider,

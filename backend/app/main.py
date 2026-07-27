@@ -25,6 +25,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     model_clients = create_shared_model_clients(settings)
     app.state.model_clients = model_clients
     try:
+        if model_clients.semantic_router is not None:
+            semantic_status = await model_clients.semantic_router.initialize_async()
+            if semantic_status.enabled and semantic_status.state != "ready":
+                logger.warning(
+                    "Semantic router is configured but unavailable at startup "
+                    "model_source=%s error_category=%s; LLM fallback remains enabled",
+                    semantic_status.model_source,
+                    semantic_status.error_category,
+                )
         if settings.local_llama_enabled:
             available = await model_clients.llama.probe_health(
                 timeout_seconds=settings.local_llama_startup_probe_timeout_seconds

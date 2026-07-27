@@ -1,5 +1,7 @@
 # Generated from the core [project.dependencies] in pyproject.toml.
 # Development: pip install -e ".[dev]"
+# Semantic router runtime: pip install -e ".[semantic-router]"
+# Semantic router training: pip install -e ".[semantic-router-train]"
 # Local DeepSeek OCR model: pip install -e ".[ocr-ml]"
 fastapi>=0.115.14
 uvicorn[standard]>=0.35.0

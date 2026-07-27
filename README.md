@@ -15,10 +15,14 @@ Students can type a prompt and receive:
 - hints and common mistakes
 - an interactive GeoGebra visualization when the backend can generate one
 
-Image upload uses local OCR. A local llama.cpp model selects problem type,
-difficulty, visualization environment, semantic catalog terms, and any narrow
-deterministic arithmetic/algebra execution path. It also extracts validated
-visualization DSL, while proof-style geometry can use NVIDIA NIM routing.
+Image upload uses local OCR. For text requests, the exact parser gets the first
+execution attempt. Unsupported prompts then pass through an optional multilingual
+sentence-embedding router for independent problem-type, difficulty, and
+visualization classification. The local llama.cpp classifier is retained only as
+an uncertainty or availability fallback. Embedding labels never authorize
+execution; deterministic solvers still re-parse the original prompt. The local
+llama.cpp model also extracts validated visualization DSL, while proof-style
+geometry can use NVIDIA NIM routing.
 
 ## Tech stack
 
@@ -95,15 +99,25 @@ names, endpoint order, timeout policy, and failure labels live in the neutral
 `backend/app/core/model_policy.py` module.
 
 Current models and local routes:
-- **AI-selected deterministic execution:** `local:deterministic-solver`
-- **Local visualization DSL extraction:** `local:llama-geometry-parser`, backed by `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` through llama-server with JSON-schema constraints
-- **Local semantic routing:** the same llama.cpp model selects problem type,
-  difficulty, and the visualization environment (`none`, 2D, graphing, 3D,
-  CAS, probability, statistics, or spreadsheet) in one constrained response
+- **Exact deterministic execution:** `local:deterministic-solver`, entered only after the original prompt passes the exact parser
+- **Primary semantic routing:** `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, loaded once per API worker from local files and scored against independent multilingual prototype banks
+- **Uncertain semantic-routing fallback:** `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` through llama-server with a constrained problem-type/difficulty/visualization schema
+- **Local visualization DSL extraction:** the same llama.cpp model through llama-server with JSON-schema constraints
 - **Easy / lower-latency solving via NVIDIA NIM:** `openai/gpt-oss-20b`
 - **Hard / proof-heavy solving via NVIDIA NIM:** `openai/gpt-oss-120b`
 - **Explicit JSON fallback routing:** NVIDIA-hosted gpt-oss models with no opaque router alias
 - **OCR / visual extraction locally:** `deepseek-ai/deepseek-ocr-2`
+
+The embedding router supports English, Vietnamese, and mixed-language starter
+examples. Its problem type, difficulty, and visualization scores have separate
+confidence and margin gates. Uncertain difficulty safely defaults to `medium`
+without forcing an LLM call; uncertain required routing axes, OOD inputs, an
+unavailable local embedding model, and overlong inputs can use the retained LLM
+classifier. If both classifiers fail, the response remains explicitly
+unclassified. GeoGebra term retrieval is a separate nearest-example operation
+and cannot turn a failed classification into an accepted one. The 216-row starter
+corpus is AI-authored and every example is marked `needs_review`; its evaluation
+results are development measurements, not production accuracy claims.
 
 Visualization extraction is local-first whenever the llama.cpp parser is enabled,
 healthy, and the prompt is within its 4,000-character limit. Local unavailability,
@@ -114,21 +128,23 @@ one action-scoped repair; every provider/model/operation tuple is attempted at m
 and all attempts share the overall solve deadline.
 
 Examples:
-- AI-selected arithmetic → `local:deterministic-solver`
-- AI-selected linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
-- AI-selected quadratic graph analysis → `local:deterministic-solver`
+- exact arithmetic → `local:deterministic-solver` before semantic routing
+- exactly supported linear equations, including `ax+b=cx+d`, `2(x+3)=14`, and `x/2+3=7` → `local:deterministic-solver`
+- exactly supported quadratic graph analysis → `local:deterministic-solver`
+- unsupported syntax → embedding classification, then structured solving or the LLM routing fallback when uncertain
 - geometry proofs → `openai/gpt-oss-120b`
 - proof-style calculus → `openai/gpt-oss-120b`
-- image input → OCR first, then normal model routing and optional AI-selected local execution
+- image input → OCR first, then the same exact-first routing flow
 
 ### 3. Catalog-driven GeoGebra DSL
 The model is not allowed to emit arbitrary GeoGebra syntax. DSL `1.1` is the
 only accepted visualization format and includes both the existing high-level
 actions and the typed generic `EXECUTE_COMMAND` action.
 
-Visualization environments are selected by the local model, not by object-name
-or command-name branches. The selected environment bounds catalog retrieval;
-the DSL model then chooses among only the relevant retrieved commands.
+Visualization environments are selected by the semantic router (or its LLM
+fallback), not by object-name or command-name branches. The selected environment
+bounds catalog retrieval; the DSL model then chooses among only the relevant
+retrieved commands.
 
 Instead, visualization intent is represented as structured actions such as:
 - `CREATE_POINT`
@@ -146,9 +162,9 @@ Instead, visualization intent is represented as structured actions such as:
 
 Generic command arguments use discriminated kinds: `reference`, `number`,
 `angle`, `point`, `vector`, `text`, `boolean`, `expression`, `equation`, `list`,
-and `interval`. IntoMath classifies the visualization environment, asks the tiny
-model for semantic GeoGebra search terms, retrieves at most 10 relevant commands
-from the local registry, validates signatures,
+and `interval`. IntoMath classifies the visualization environment, retrieves
+separate dense nearest-example GeoGebra search terms when available, retrieves at
+most 10 relevant commands from the local registry, validates signatures,
 types and dependencies, and only then translates it. The full catalog is never
 placed in a model prompt.
 
@@ -234,6 +250,13 @@ cd backend
 ../.venv-local/bin/uvicorn app.main:app --reload
 ```
 
+Install `backend[semantic-router]` on workers that use embedding routing and
+provision the configured model into the local Hugging Face cache (or set
+`SEMANTIC_ROUTER_MODEL_PATH`). Normal tests, startup, and requests never download
+model files. Fine-tuning is an explicit, optional `backend[semantic-router-train]`
+development operation; generated weights under `backend/models/semantic_router/`
+are ignored and never selected by runtime configuration automatically.
+
 Frontend default URL: `http://localhost:3000`
 
 Backend default URL: `http://localhost:8000`
@@ -254,9 +277,9 @@ Backend default URL: `http://localhost:8000`
 - `NVIDIA_BASE_URL` — defaults to `https://integrate.api.nvidia.com/v1`
 - `DATABASE_URL`
 - `CORS_ORIGINS`
-- `LOCAL_SOLVER_FIRST` — defaults to `true`; allows AI-selected deterministic execution before model-backed solving
+- `LOCAL_SOLVER_FIRST` — defaults to `true`; enables the exact deterministic attempt before semantic routing
 - `LOCAL_LLAMA_ENABLED` — defaults to `true`; master switch for the local llama.cpp integration
-- `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; requires local llama-server to select and normalize supported deterministic-execution prompts
+- `LOCAL_SOLVER_LLAMA_DETECTION_ENABLED` — defaults to `true`; enables the retained LLM semantic-classification fallback
 - `LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED` — defaults to `true`; enables the local concept/trivia fallback
 - `LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED` — defaults to `true`; makes the healthy local model the primary validated visualization DSL parser
 - `LOCAL_SOLVER_LLAMA_BASE_URL` — defaults to `http://localhost:8080`
@@ -266,6 +289,14 @@ Backend default URL: `http://localhost:8000`
 - `LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS` — defaults to `60.0`; skips repeated dead local hops after a connectivity failure
 - `LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS` — defaults to `30.0`
 - `LOCAL_LLAMA_GEOMETRY_MAX_TOKENS` — defaults to `1200`
+- `SEMANTIC_ROUTER_ENABLED` — defaults to `true`; unavailable local files degrade to the LLM fallback
+- `SEMANTIC_ROUTER_MODEL` — base model identifier; runtime loading is always local-files-only
+- `SEMANTIC_ROUTER_MODEL_PATH` / `SEMANTIC_ROUTER_ARTIFACT_PATH` — optional local exported model and prototype paths
+- `SEMANTIC_ROUTER_DEVICE` — defaults to `cpu`
+- `SEMANTIC_ROUTER_MAX_TEXT_CHARS` — defaults to `4000`
+- `SEMANTIC_ROUTER_MIN_CONFIDENCE`, `SEMANTIC_ROUTER_MIN_MARGIN`, and `SEMANTIC_ROUTER_MIN_RAW_SIMILARITY` — deployment floors; artifact recommendations can be stricter
+- `SEMANTIC_ROUTER_TERM_MIN_SIMILARITY` — independent dense search-term retrieval floor
+- `SEMANTIC_ROUTER_FALLBACK_TO_LLM` — defaults to `true`
 
 ## Validation
 

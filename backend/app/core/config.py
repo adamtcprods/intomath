@@ -57,6 +57,19 @@ class Settings(BaseSettings):
     local_llama_unavailable_cooldown_seconds: float = Field(default=60.0, gt=0, le=600)
     local_llama_geometry_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     local_llama_geometry_max_tokens: int = Field(default=1_200, ge=200, le=4_000)
+    semantic_router_enabled: bool = True
+    semantic_router_model: str = (
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    )
+    semantic_router_model_path: str = ""
+    semantic_router_artifact_path: str = ""
+    semantic_router_device: str = "cpu"
+    semantic_router_max_text_chars: int = Field(default=4_000, ge=100, le=100_000)
+    semantic_router_min_confidence: float = Field(default=0.60, ge=0.0, le=1.0)
+    semantic_router_min_margin: float = Field(default=0.05, ge=0.0, le=1.0)
+    semantic_router_min_raw_similarity: float = Field(default=0.20, ge=-1.0, le=1.0)
+    semantic_router_term_min_similarity: float = Field(default=0.55, ge=-1.0, le=1.0)
+    semantic_router_fallback_to_llm: bool = True
     database_url: str = "sqlite:///./intomath.db"
     cors_origins: str = Field(default="http://localhost:3000")
 
@@ -69,6 +82,10 @@ class Settings(BaseSettings):
     @property
     def geogebra_catalog_path(self) -> Path:
         return Path(__file__).resolve().parents[2] / "geogebra_commands.json"
+
+    @property
+    def semantic_router_data_path(self) -> Path:
+        return BACKEND_DIR / "data" / "semantic_router"
 
 
 @lru_cache

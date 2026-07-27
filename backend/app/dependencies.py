@@ -12,6 +12,7 @@ from app.db.session import SessionLocal
 from app.integrations.llama_client import LlamaClient
 from app.integrations.nvidia_client import NvidiaClient
 from app.repositories.result_repository import ResultRepository
+from app.services.semantic_router import SemanticRouter
 from app.services.solver_service import SolverService
 
 
@@ -21,6 +22,7 @@ class SharedModelClients:
 
     nvidia: NvidiaClient
     llama: LlamaClient
+    semantic_router: SemanticRouter | None = None
 
     async def aclose(self) -> None:
         # Attempt both closes even if one integration reports a shutdown error.
@@ -39,6 +41,7 @@ def create_shared_model_clients(settings: Any) -> SharedModelClients:
     return SharedModelClients(
         nvidia=NvidiaClient(settings),
         llama=LlamaClient(settings),
+        semantic_router=SemanticRouter(settings),
     )
 
 
@@ -51,4 +54,5 @@ def get_solver_service(
         result_repository=ResultRepository(SessionLocal),
         nvidia_client=clients.nvidia,
         llama_client=clients.llama,
+        semantic_router=clients.semantic_router,
     )

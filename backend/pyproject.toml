@@ -20,6 +20,14 @@ dependencies = [
 dev = [
   "pytest>=8.4.1",
 ]
+semantic-router = [
+  "numpy>=1.26.0",
+  "sentence-transformers>=3.4.0,<6.0.0",
+]
+semantic-router-train = [
+  "numpy>=1.26.0",
+  "sentence-transformers[train]>=3.4.0,<6.0.0",
+]
 ocr-ml = [
   "torch>=2.5.0",
   "transformers>=4.47.0",
