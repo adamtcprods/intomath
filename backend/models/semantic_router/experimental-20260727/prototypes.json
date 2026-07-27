@@ -7759,7 +7759,7 @@
     }
   },
   "min_raw_similarity": 0.2918630854748307,
-  "model_name": "/mnt/KHONG DUOC XOA/desktop/desktop/intomath/backend/models/semantic_router/experimental-20260727/model",
+  "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
   "recommended_confidence": {
     "difficulty": 0.6,
     "problem_type": 0.6,
