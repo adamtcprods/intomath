@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import resource
 import threading
 import time
@@ -23,6 +22,7 @@ from app.semantic_router.prototypes import (
     build_prototype_artifact,
     cosine_similarity,
     normalize_vector,
+    score_axis,
 )
 
 
@@ -54,7 +54,10 @@ class SentenceTransformerEmbeddingBackend:
             local_files_only=True,
         )
         self._model_name = source
-        dimension = self._model.get_sentence_embedding_dimension()
+        dimension_getter = getattr(self._model, "get_embedding_dimension", None)
+        if not callable(dimension_getter):
+            dimension_getter = self._model.get_sentence_embedding_dimension
+        dimension = dimension_getter()
         if not isinstance(dimension, int) or dimension <= 0:
             raise RuntimeError("embedding model did not report a valid dimension")
         self._dimension = dimension
@@ -290,7 +293,7 @@ class SemanticRouter:
             if len(query) != artifact.embedding_dimension:
                 raise ValueError("query embedding dimension does not match prototypes")
             axis_scores = tuple(
-                (axis, self._score_axis(query, artifact, axis))
+                (axis, score_axis(query, artifact, axis))
                 for axis in (
                     "problem_type",
                     "difficulty",
@@ -414,40 +417,6 @@ class SemanticRouter:
             model_path.parent / "prototypes.json",
         )
         return next((path for path in candidates if path.is_file()), candidates[-1])
-
-    def _score_axis(
-        self,
-        query: Sequence[float],
-        artifact: PrototypeArtifact,
-        axis: str,
-    ) -> AxisScore:
-        similarities = {
-            label: cosine_similarity(query, centroid)
-            for label, centroid in artifact.centroids[axis].items()
-        }
-        temperature = max(1e-6, float(artifact.temperatures.get(axis, 0.10)))
-        maximum_logit = max(similarities.values()) / temperature
-        exponentials = {
-            label: math.exp(similarity / temperature - maximum_logit)
-            for label, similarity in similarities.items()
-        }
-        denominator = sum(exponentials.values())
-        probabilities = {
-            label: value / denominator for label, value in exponentials.items()
-        }
-        ordered = sorted(
-            probabilities.items(), key=lambda item: (-item[1], item[0])
-        )
-        top_label, top_probability = ordered[0]
-        runner_label, runner_probability = ordered[1]
-        return AxisScore(
-            label=top_label,
-            confidence=top_probability,
-            runner_up=runner_label,
-            margin=top_probability - runner_probability,
-            raw_similarity=similarities[top_label],
-            scores=tuple(ordered),
-        )
 
     def _axis_is_confident(
         self,

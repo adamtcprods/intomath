@@ -66,6 +66,16 @@ def test_starter_dataset_represents_every_label_in_each_split() -> None:
         }
         assert {row.difficulty.value for row in rows} == {"easy", "medium", "hard"}
         assert {row.language for row in rows} == {"en", "vi", "mixed"}
+        assert {row.visualization_label for row in rows} == {
+            "none",
+            "geometry_2d",
+            "graphing",
+            "graphics_3d",
+            "cas",
+            "probability",
+            "statistics",
+            "spreadsheet",
+        }
 
 
 def test_starter_dataset_has_no_group_leakage() -> None:

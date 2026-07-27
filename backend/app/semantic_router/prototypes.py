@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from app.semantic_router.contracts import (
     ARTIFACT_SCHEMA_VERSION,
     AXIS_LABELS,
+    AxisScore,
     SemanticExample,
 )
 
@@ -108,6 +109,38 @@ def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     if len(normalized_left) != len(normalized_right):
         raise ValueError("embedding dimensions do not match")
     return sum(a * b for a, b in zip(normalized_left, normalized_right, strict=True))
+
+
+def score_axis(
+    query: Sequence[float],
+    artifact: PrototypeArtifact,
+    axis: str,
+) -> AxisScore:
+    similarities = {
+        label: cosine_similarity(query, centroid)
+        for label, centroid in artifact.centroids[axis].items()
+    }
+    temperature = max(1e-6, float(artifact.temperatures.get(axis, 0.10)))
+    maximum_logit = max(similarities.values()) / temperature
+    exponentials = {
+        label: math.exp(similarity / temperature - maximum_logit)
+        for label, similarity in similarities.items()
+    }
+    denominator = sum(exponentials.values())
+    probabilities = {
+        label: value / denominator for label, value in exponentials.items()
+    }
+    ordered = sorted(probabilities.items(), key=lambda item: (-item[1], item[0]))
+    top_label, top_probability = ordered[0]
+    runner_label, runner_probability = ordered[1]
+    return AxisScore(
+        label=top_label,
+        confidence=top_probability,
+        runner_up=runner_label,
+        margin=top_probability - runner_probability,
+        raw_similarity=similarities[top_label],
+        scores=tuple(ordered),
+    )
 
 
 def _axis_label(example: SemanticExample, axis: str) -> str:
@@ -286,4 +319,5 @@ __all__ = [
     "cosine_similarity",
     "mean_normalized",
     "normalize_vector",
+    "score_axis",
 ]
