@@ -1,5 +1,6 @@
 [project]
 name = "intomath-backend"
+version = "0.1.0"
 description = "IntoMath backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,9 +15,20 @@ dependencies = [
   "pillow>=11.0.0",
   "torch>=2.5.0",
   "transformers>=4.47.0",
-  "pytest>=8.4.1",
   "openai>=2.0.0"
 ]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.1",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
