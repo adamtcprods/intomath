@@ -11,12 +11,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
-from app.core.solve_metrics import record_model_attempt
-from app.integrations.errors import (
-    IntegrationFailureCategory,
-    IntegrationRequestError,
-    exception_diagnostics,
-)
+from app.integrations.errors import IntegrationRequestError, exception_diagnostics
 
 
 logger = logging.getLogger(__name__)
@@ -32,35 +27,8 @@ class LlamaClient:
 
     _unavailable_until_by_base_url: ClassVar[dict[str, float]] = {}
 
-    def __init__(
-        self,
-        settings: Any | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        http_client: httpx.AsyncClient | None = None,
-        openai_client: AsyncOpenAI | None = None,
-    ) -> None:
-        if transport is not None and http_client is not None:
-            raise ValueError("Pass either transport or http_client, not both.")
-        self.settings = settings or get_settings()
-        self._owns_http_client = http_client is None
-        self.http_client = http_client or httpx.AsyncClient(transport=transport)
-        self._owns_openai_client = openai_client is None
-        self.openai_client = openai_client or AsyncOpenAI(
-            base_url=f"{self._configured_base_url()}/v1",
-            api_key="llama-server",
-            max_retries=0,
-            http_client=self.http_client,
-        )
-
-    async def aclose(self) -> None:
-        """Close model and health-check pools owned by this wrapper."""
-        try:
-            if self._owns_openai_client:
-                await self.openai_client.close()
-        finally:
-            if self._owns_http_client and not self.http_client.is_closed:
-                await self.http_client.aclose()
+    def __init__(self) -> None:
+        self.settings = get_settings()
 
     @property
     def enabled(self) -> bool:
@@ -96,10 +64,10 @@ class LlamaClient:
         base_url = self._configured_base_url()
         health_url = f"{base_url}/health"
         try:
-            response = await asyncio.wait_for(
-                self.http_client.get(health_url, timeout=request_timeout),
-                timeout=request_timeout,
-            )
+            async with httpx.AsyncClient(timeout=request_timeout) as client:
+                response = await asyncio.wait_for(
+                    client.get(health_url), timeout=request_timeout
+                )
             if response.status_code >= 400:
                 raise IntegrationRequestError(
                     f"Llama-server health probe returned HTTP {response.status_code}.",
@@ -157,7 +125,6 @@ class LlamaClient:
                 provider="llama.cpp",
                 model=selected_model,
                 operation=operation,
-                failure_category=IntegrationFailureCategory.connectivity,
             )
 
         request_timeout = (
@@ -167,6 +134,12 @@ class LlamaClient:
         )
         request_max_tokens = max_tokens if max_tokens is not None else 500
         base_url = f"{self._configured_base_url()}/v1"
+
+        client = AsyncOpenAI(
+            base_url=base_url,
+            api_key="llama-server",
+            max_retries=0,
+        )
 
         response_format: dict[str, Any] = {"type": "json_object"}
         if json_schema is not None:
@@ -188,11 +161,6 @@ class LlamaClient:
             base_url,
             request_timeout,
         )
-        record_model_attempt(
-            provider="llama.cpp",
-            model=selected_model,
-            operation=operation,
-        )
         try:
             extra_body = (
                 {"thinking_budget_tokens": thinking_budget_tokens}
@@ -200,7 +168,7 @@ class LlamaClient:
                 else None
             )
             response = await asyncio.wait_for(
-                self.openai_client.chat.completions.create(
+                client.chat.completions.create(
                     model=selected_model,
                     messages=[{"role": "user", "content": prompt}],
                     response_format=response_format,  # type: ignore[arg-type]
@@ -217,7 +185,6 @@ class LlamaClient:
                 provider="llama.cpp",
                 model=selected_model,
                 operation=operation,
-                failure_category=IntegrationFailureCategory.timeout,
             )
             diagnostics = exception_diagnostics(error)
             logger.warning(
@@ -243,11 +210,6 @@ class LlamaClient:
                 operation=operation,
                 status_code=diagnostics.status_code,
                 response_body=diagnostics.response_body,
-                failure_category=(
-                    IntegrationFailureCategory.connectivity
-                    if self._is_connectivity_failure(exc)
-                    else IntegrationFailureCategory.http_error
-                ),
             )
             logger.warning(
                 "Llama-server request failed operation=%s trace_id=%s model=%s "
@@ -266,13 +228,7 @@ class LlamaClient:
         text = response.choices[0].message.content or ""
         text = text.strip()
         if not text:
-            raise IntegrationRequestError(
-                f"Llama-server returned an empty response for {selected_model}.",
-                provider="llama.cpp",
-                model=selected_model,
-                operation=operation,
-                failure_category=IntegrationFailureCategory.invalid_response,
-            )
+            raise RuntimeError(f"Llama-server returned an empty response for {selected_model}.")
 
         # Strip reasoning tags (<think>...</think>) if they are present in the response
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -280,22 +236,14 @@ class LlamaClient:
         try:
             payload = json.loads(self._strip_json_wrappers(text))
         except json.JSONDecodeError as exc:
-            raise IntegrationRequestError(
+            raise RuntimeError(
                 f"Llama-server returned invalid JSON for model {selected_model} "
-                f"at line {exc.lineno}, column {exc.colno}.",
-                provider="llama.cpp",
-                model=selected_model,
-                operation=operation,
-                failure_category=IntegrationFailureCategory.invalid_response,
+                f"at line {exc.lineno}, column {exc.colno}."
             ) from exc
         if not isinstance(payload, dict):
-            raise IntegrationRequestError(
+            raise RuntimeError(
                 f"Llama-server returned JSON {type(payload).__name__} for model "
-                f"{selected_model}; expected object.",
-                provider="llama.cpp",
-                model=selected_model,
-                operation=operation,
-                failure_category=IntegrationFailureCategory.invalid_response,
+                f"{selected_model}; expected object."
             )
         logger.info(
             "Llama-server request succeeded operation=%s trace_id=%s model=%s response_chars=%s",
@@ -315,19 +263,17 @@ class LlamaClient:
         temperature: float = 0.2,
         json_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
-        max_tokens: int = 500,
         timeout_seconds: float | None = None,
         operation: str = "json_completion",
         trace_id: str | None = None,
-        thinking_budget_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Adapt the shared structured-completion interface to llama-server."""
         _ = (model, temperature, schema_name)
         return await self.generate_json(
             prompt=f"{system_prompt.strip()}\n\n{user_prompt.strip()}".strip(),
-            max_tokens=max_tokens,
-            thinking_budget_tokens=thinking_budget_tokens,
+            max_tokens=kwargs.get("max_tokens"),
+            thinking_budget_tokens=kwargs.get("thinking_budget_tokens"),
             timeout_seconds=timeout_seconds,
             json_schema=json_schema,
             operation=operation,

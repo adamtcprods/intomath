@@ -35,29 +35,7 @@ Create a virtual environment and install dependencies:
 
 ```bash
 python3 -m venv .venv-local
-.venv-local/bin/pip install -e "backend[dev]"
-```
-
-`backend/pyproject.toml` is the canonical dependency definition.
-`backend/requirements.txt` mirrors only its core runtime dependencies for
-environments that require a requirements file. Install the optional multilingual
-semantic-router runtime only on workers that use it:
-
-```bash
-.venv-local/bin/pip install -e "backend[semantic-router]"
-```
-
-Install the larger training-only stack only for explicit offline experiments:
-
-```bash
-.venv-local/bin/pip install -e "backend[semantic-router-train]"
-```
-
-The large local OCR stack is optional; install it only on workers that process
-images:
-
-```bash
-.venv-local/bin/pip install -e "backend[ocr-ml]"
+.venv-local/bin/pip install -r backend/requirements.txt
 ```
 
 ### Geometry DSL `1.1` artifact migration
@@ -79,6 +57,18 @@ Use `--database-url` to override `DATABASE_URL` and `--failure-report PATH` to
 export malformed artifact IDs and validation errors. The migration preserves
 stored GeoGebra commands and leaves invalid legacy DSL records unchanged.
 
+Run the API:
+
+```bash
+.venv-local/bin/uvicorn app.main:app --app-dir backend --reload
+```
+
+This starts FastAPI on:
+
+```text
+http://localhost:8000
+```
+
 ## Backend environment
 
 Create `backend/.env` with values like:
@@ -87,23 +77,8 @@ Create `backend/.env` with values like:
 APP_NAME=IntoMath API
 APP_ENV=development
 APP_DEBUG=true
-SOLVE_REQUEST_TIMEOUT_SECONDS=70.0
-MAX_SOLVE_TEXT_LENGTH=20000
-MAX_IMAGE_BASE64_LENGTH=14000000
-MAX_DECODED_IMAGE_BYTES=10485760
-MAX_IMAGE_WIDTH=8192
-MAX_IMAGE_HEIGHT=8192
-RESPONSE_CACHE_TTL_SECONDS=900
-RESPONSE_CACHE_MAX_SIZE=500
-OCR_CACHE_TTL_SECONDS=3600
-OCR_CACHE_MAX_SIZE=256
 REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0
 NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0
-STRUCTURED_SOLUTION_MAX_TOKENS=4500
-GEOMETRY_EXTRACTION_MAX_TOKENS=1200
-GEOMETRY_REPAIR_MAX_TOKENS=800
-MISSING_STEP_REPAIR_MAX_TOKENS=2000
-CONTENT_REPAIR_MAX_TOKENS=2500
 NVIDIA_API_KEY=
 NVIDIA_DIRECT_ENABLED=true
 NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
@@ -116,45 +91,12 @@ LOCAL_SOLVER_LLAMA_TRIVIA_ENABLED=true
 LOCAL_LLAMA_GEOMETRY_EXTRACTION_ENABLED=true
 LOCAL_SOLVER_LLAMA_BASE_URL=http://localhost:8080
 LOCAL_SOLVER_LLAMA_MODEL=unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL
-LOCAL_ROUTER_LLAMA_MAX_TOKENS=300
 LOCAL_SOLVER_LLAMA_TIMEOUT_SECONDS=20.0
 LOCAL_LLAMA_STARTUP_PROBE_TIMEOUT_SECONDS=1.0
 LOCAL_LLAMA_UNAVAILABLE_COOLDOWN_SECONDS=60.0
 LOCAL_LLAMA_GEOMETRY_TIMEOUT_SECONDS=30.0
 LOCAL_LLAMA_GEOMETRY_MAX_TOKENS=1200
-SEMANTIC_ROUTER_ENABLED=true
-SEMANTIC_ROUTER_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-SEMANTIC_ROUTER_MODEL_PATH=
-SEMANTIC_ROUTER_ARTIFACT_PATH=
-SEMANTIC_ROUTER_DEVICE=cpu
-SEMANTIC_ROUTER_MAX_TEXT_CHARS=4000
-SEMANTIC_ROUTER_MIN_CONFIDENCE=0.60
-SEMANTIC_ROUTER_MIN_MARGIN=0.05
-SEMANTIC_ROUTER_MIN_RAW_SIMILARITY=0.20
-SEMANTIC_ROUTER_TERM_MIN_SIMILARITY=0.55
-SEMANTIC_ROUTER_FALLBACK_TO_LLM=true
 ```
-
-`SOLVE_REQUEST_TIMEOUT_SECONDS` is the wall-clock budget for the complete solve
-pipeline, including input validation/OCR, routing, solving and repairs,
-visualization, and cache population. Best-effort result persistence runs after
-that solve budget in a worker thread. Expiration returns HTTP 504
-with a generic message; the request ID and active stage are recorded only in
-server logs. The text, Base64, decoded-byte, and image-dimension limits reject
-oversized requests with HTTP 413. Invalid Base64, unsupported or missing MIME
-types, MIME/content mismatches, and malformed images return HTTP 422. Supported
-image MIME types are `image/jpeg`, `image/png`, `image/webp`, and `image/gif`.
-
-The response and OCR caches are bounded, process-local in-memory caches.
-`*_CACHE_TTL_SECONDS` controls entry lifetime and `*_CACHE_MAX_SIZE` controls
-the maximum number of entries per process. OCR entries contain extracted text
-and metadata only; decoded image and Base64 payloads are never stored.
-
-The remote output budgets are operation-specific: 4500 tokens for a full
-structured solution, 1200 for geometry extraction, 800 for geometry repair,
-2000 for missing-step repair, and 2500 for content repair. The separate
-`LOCAL_ROUTER_LLAMA_MAX_TOKENS` and `LOCAL_LLAMA_GEOMETRY_MAX_TOKENS` controls
-remain authoritative for local llama.cpp routing and geometry extraction.
 
 ### PostgreSQL option
 
@@ -164,147 +106,17 @@ For PostgreSQL, set `DATABASE_URL` to something like:
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
 ```
 
-## Database setup and migrations
-
-Application startup does not create or modify tables. Run Alembic before
-starting a new deployment and whenever the backend is upgraded.
-
-### SQLite
-
-For local development, configure the path in `backend/.env`:
-
-```env
-DATABASE_URL=sqlite:///./intomath.db
-```
-
-From the `backend` directory, upgrade an empty or existing Alembic-managed
-database to the latest schema:
-
-```bash
-cd backend
-../.venv-local/bin/alembic upgrade head
-```
-
-SQLite creates `intomath.db` automatically if it does not exist. To inspect the
-current and available revisions:
-
-```bash
-../.venv-local/bin/alembic current
-../.venv-local/bin/alembic history
-```
-
-### PostgreSQL
-
-Create the database, set its URL, and run the same migration:
-
-```bash
-createdb intomath
-export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/intomath
-cd backend
-../.venv-local/bin/alembic upgrade head
-```
-
-For later application upgrades, deploy the new code and run
-`alembic upgrade head` before starting API workers. Back up a production
-database before migrating. Databases previously created only through
-`Base.metadata.create_all()` are not Alembic-managed; preserve any required
-data and establish an explicit baseline before deploying rather than stamping
-an unverified schema.
-
-Tests may continue to use `Base.metadata.create_all()` with an in-memory or
-temporary SQLite engine to create disposable schemas quickly. Production and
-long-lived development databases must use Alembic.
-
-Run the API from the `backend` directory so the relative SQLite URL resolves
-consistently:
-
-```bash
-../.venv-local/bin/uvicorn app.main:app --reload
-```
-
-This starts FastAPI on `http://localhost:8000`.
-
-## Semantic router provisioning and evaluation
-
-The API never downloads sentence-transformer files during startup or a request.
-Provision the base encoder explicitly before enabling it on a worker. For a
-one-time cache download and untouched-base evaluation, run from the repository
-root:
-
-```bash
-.venv-local/bin/python backend/scripts/evaluate_semantic_router.py \
-  --data-dir backend/data/semantic_router \
-  --output-dir /tmp/intomath-semantic-router-base \
-  --allow-download
-```
-
-Without `--allow-download`, evaluation is local-files-only, matching production
-behavior. Set `SEMANTIC_ROUTER_MODEL` to the cached model identifier, or set
-`SEMANTIC_ROUTER_MODEL_PATH` to an exported local `model/` directory and
-`SEMANTIC_ROUTER_ARTIFACT_PATH` to its sibling `prototypes.json`. A configured
-model path takes precedence. The model and prototypes load once per API worker;
-a missing package, model, or invalid artifact marks the router unavailable and
-uses the retained LLM classifier when `SEMANTIC_ROUTER_FALLBACK_TO_LLM=true`.
-
-The checked-in corpus under `backend/data/semantic_router/` has 216 AI-authored
-starter examples: 144 train, 36 validation, and 36 locked test rows. Every row is
-`needs_review`; none is reviewed or production-ready. English, Vietnamese, and
-mixed-language rows are grouped by `group_id`, and every paraphrase/translation
-group stays in one split. Add examples as grouped JSONL rows with unique IDs and
-source IDs, then run the data tests before recalibrating. Do not store user
-prompts as training data without a separate explicit data policy.
-
-Optional experimental fine-tuning uses three independent binary pair streams and
-three separate `CosineSimilarityLoss` objectives—one each for problem type,
-difficulty, and visualization. There is no composite cosine target. The command
-refuses to overwrite an output directory:
-
-```bash
-.venv-local/bin/python backend/scripts/train_semantic_router.py \
-  --data-dir backend/data/semantic_router \
-  --output-dir backend/models/semantic_router/experimental \
-  --base-model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
-  --seed 42 \
-  --allow-needs-review
-```
-
-`--allow-needs-review` acknowledges that the run is experimental; it does not
-change row review status. Generated `model/`, `prototypes.json`, `metadata.json`,
-and `evaluation.json` files are ignored by Git. The report compares the untouched
-base and tuned model on the locked test split. Promotion requires strict
-improvement in problem-type macro-F1, visualization macro-F1, English,
-Vietnamese, and mixed-language joint accuracy, and selective accuracy at fixed
-70% coverage, with no unacceptable warm-latency or model-memory regression.
-Failure of any gate records `keep_base_model`. Training never changes
-`SEMANTIC_ROUTER_MODEL_PATH`, `SEMANTIC_ROUTER_ARTIFACT_PATH`, or any other runtime
-configuration automatically.
-
-Re-evaluate any exported directory independently with:
-
-```bash
-.venv-local/bin/python backend/scripts/evaluate_semantic_router.py \
-  --data-dir backend/data/semantic_router \
-  --model-dir backend/models/semantic_router/experimental
-```
-
-All starter-set results are development measurements, not production accuracy
-claims. Human review, a larger representative benchmark, and deployment-specific
-latency/memory validation are required before promotion.
-
 ## Solver model configuration
 
 IntoMath expects the following model policy:
 
-- exact deterministic arithmetic/algebra execution before semantic routing: `local:deterministic-solver`
-- primary English/Vietnamese/mixed semantic routing: local `paraphrase-multilingual-MiniLM-L12-v2` prototype scoring
-- uncertain or unavailable embedding routing: one constrained local llama.cpp classification fallback
+- AI-selected deterministic arithmetic/algebra execution: `local:deterministic-solver`
 - easy solving via NVIDIA NIM: `openai/gpt-oss-20b`
 - hard solving via NVIDIA NIM: `openai/gpt-oss-120b`
-- structured-solve NVIDIA fallback: preferred routed gpt-oss model, then its alternate
-- geometry fallback: local llama.cpp, gpt-oss-20b, then gpt-oss-120b when the typed failure policy permits
+- NVIDIA NIM fallback order: gpt-oss-120b, gpt-oss-20b
 - OCR / vision locally: `deepseek-ai/deepseek-ocr-2`
 
-For LLM classification fallback, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
+For local-first routing, normalization, trivia fallback, and visualization DSL extraction, run the local model through llama-server:
 
 ```bash
 ./llama-server \
@@ -341,14 +153,12 @@ Start the server before the API, restart the API after starting it, or wait for 
 cooldown to expire; a successful request closes the circuit. Geometry continues through
 the validated NVIDIA direct model fallbacks while the circuit is open.
 
-The embedding router or its LLM fallback proposes problem type, difficulty, and
-visualization environment; the visualization model proposes DSL. There are no
-object-name branches that decide 2D versus 3D. Deterministic code remains the
-trust boundary: embeddings never authorize execution, and the backend rejects
-unsupported normalization hints while validating labels, dependencies, retrieved
-command membership, overload argument types, environment compatibility, numeric
-values, expressions, and action count before producing GeoGebra commands.
-Explicit visualization requests may use neutral finite
+The model proposes problem type, difficulty, visualization environment, and DSL;
+there are no object-name branches that decide 2D versus 3D. Deterministic code
+remains the trust boundary: it rejects unsupported normalization hints and validates
+labels, dependencies, retrieved command membership, overload argument types,
+environment compatibility, numeric values, expressions, and action count before
+producing GeoGebra commands. Explicit visualization requests may use neutral finite
 placement/scale defaults solely to make an under-specified object visible. If every
 model-backed extractor is unavailable or invalid, no visualization is generated.
 
@@ -361,25 +171,22 @@ The current code routes solver requests in `backend/app/services/solver_service.
 
 NVIDIA NIM request contracts omit `response_format`, so structured solve and geometry
 requests supply their schemas in the prompt and validate every response locally.
-Geometry goes directly to the local llama.cpp parser when it is enabled, healthy, and
-the prompt is within 4,000 characters. Local unavailability, timeout, or invalid output
-uses gpt-oss-20b as the preferred remote fallback. Remote 429, timeout, connectivity,
-invalid JSON/schema, or a failed action-scoped repair may use gpt-oss-120b once if the
-overall request deadline permits. No regex construction parser replaces this flow.
+Geometry goes directly to the local llama.cpp parser, then the ordered NVIDIA list.
+Invalid model output has different warnings and follows the same model-backed fallback
+chain; no regex construction parser replaces it.
 
 Structured solve candidates are explicit and ordered:
 
 1. `openai/gpt-oss-120b`
 2. `openai/gpt-oss-20b`
 
-Geometry uses gpt-oss-20b then gpt-oss-120b after its local primary parser.
-`REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
+Geometry uses the same two-entry NVIDIA order after its local fallback. `REMOTE_MODEL_ATTEMPT_TIMEOUT_SECONDS=25.0` is
 the hard budget for ordinary remote attempts.
 `NVIDIA_LARGE_MODEL_ATTEMPT_TIMEOUT_SECONDS=50.0` applies only to direct gpt-oss-120b
 to allow for free-tier cold starts; gpt-oss-20b remains at 25s.
-HTTP 429s are not hidden or retried inside an opaque SDK. Geometry records provider,
-model, operation, duration, outcome, and typed failure category for each internal
-attempt; identical provider/model/operation attempts are suppressed.
+HTTP 429s are not hidden or retried inside an opaque SDK: logs include attempt number,
+model, provider, operation, request ID, status/body, and `failure_code=rate_limited`.
+Ordering should only change after those logs provide representative rate-limit data.
 
 Set `NVIDIA_API_KEY` to a key from build.nvidia.com. `NVIDIA_DIRECT_ENABLED=true`
 enables remote solving when the key is present. The published
@@ -412,7 +219,7 @@ bun run --cwd frontend build
 
 ### Backend
 ```bash
-python3 -m compileall backend/app backend/tests backend/scripts
+python3 -m compileall backend/app backend/tests
 .venv-local/bin/pytest backend/tests
 PYTHONPATH=backend .venv-local/bin/python backend/scripts/evaluate_geogebra_fixtures.py
 ```
@@ -462,12 +269,6 @@ metadata alongside the exact
 `support_status`, `support_requirements`, and
 `runtime_accepted_environments` plus `runtime_eligible` to every overload.
 Fixture tests do not require network access.
-
-GitHub Actions checks the upstream `main` branch every day in
-`.github/workflows/update-geogebra-catalog.yml`. When its commit changes, the
-workflow regenerates and validates both catalog files, then commits the update
-to this repository. It can also be run manually; select `force` to regenerate
-the catalog at the currently tracked upstream commit.
 
 Safe catalog commands are runtime-eligible automatically; catalog membership
 never overrides the permanent denylist. Exact overload acceptance records live

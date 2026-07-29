@@ -3,6 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.db.base import Base
 from app.schemas.solve import ProblemInput, SolveRequest, SolveResponse
 from app.services.cache import TTLCache
 from app.services.solver_service import SolverService
@@ -54,8 +58,13 @@ def test_ttl_cache_refinements() -> None:
 
 
 def test_cache_key_includes_language() -> None:
-    service = SolverService()
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
     try:
+        service = SolverService(db)
+        
         req_en = SolveRequest.model_validate({
             "input": {"text": "Solve 2+2", "language": "en"},
             "options": {"include_visualization": False}
@@ -71,7 +80,7 @@ def test_cache_key_includes_language() -> None:
         # Check they do not collide
         assert key_en != key_vi
     finally:
-        asyncio.run(service.aclose())
+        db.close()
 
 
 def test_cache_key_includes_catalog_and_visualization_versions() -> None:
@@ -163,7 +172,7 @@ def test_missing_visualization_cache_entry_is_not_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, response) is False
+    assert _cached_response_is_usable(request, request.input.text, response) is False
 
 
 def test_unclassified_missing_visualization_cache_entry_is_not_reusable() -> None:
@@ -188,10 +197,10 @@ def test_unclassified_missing_visualization_cache_entry_is_not_reusable() -> Non
         }
     )
 
-    assert _cached_response_is_usable(request, response) is False
+    assert _cached_response_is_usable(request, request.input.text, response) is False
 
 
-def test_independently_nonvisual_geometry_cache_entry_is_reusable() -> None:
+def test_geometry_without_visualization_cache_entry_is_not_reusable() -> None:
     request = SolveRequest.model_validate(
         {"input": {"text": "Prove a geometry theorem."}}
     )
@@ -213,7 +222,7 @@ def test_independently_nonvisual_geometry_cache_entry_is_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, response) is True
+    assert _cached_response_is_usable(request, request.input.text, response) is False
 
 
 def test_classified_nonvisual_cache_entry_remains_reusable() -> None:
@@ -238,7 +247,7 @@ def test_classified_nonvisual_cache_entry_remains_reusable() -> None:
         }
     )
 
-    assert _cached_response_is_usable(request, response) is True
+    assert _cached_response_is_usable(request, request.input.text, response) is True
 
 
 def test_health_endpoint_success() -> None:
@@ -249,17 +258,11 @@ def test_health_endpoint_success() -> None:
     assert data["status"] in ("ok", "degraded")
     assert data["db"] in ("ok", "error")
     assert data["version"] == "2.0.0"
-    assert data["semantic_router"]["status"] in {
-        "disabled",
-        "ready",
-        "unavailable",
-    }
-    assert isinstance(data["semantic_router"]["model_loaded"], bool)
 
 
 def test_solve_endpoint_validation_error() -> None:
-    with TestClient(app) as client:
-        # Send empty body
-        response = client.post("/api/v1/solve", json={"input": {"text": "   "}})
+    client = TestClient(app)
+    # Send empty body
+    response = client.post("/api/v1/solve", json={"input": {"text": "   "}})
     assert response.status_code == 422
     assert "At least one of" in response.text

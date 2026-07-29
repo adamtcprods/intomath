@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
 
 MAX_LOGGED_ERROR_BODY_CHARS = 2_000
@@ -27,14 +26,6 @@ class ExceptionDiagnostics:
     response_body: str | None
 
 
-class IntegrationFailureCategory(str, Enum):
-    timeout = "timeout"
-    connectivity = "connectivity"
-    rate_limit = "rate_limit"
-    http_error = "http_error"
-    invalid_response = "invalid_response"
-
-
 class IntegrationRequestError(RuntimeError):
     """An integration failure with safe, structured diagnostics for callers/logs."""
 
@@ -47,14 +38,12 @@ class IntegrationRequestError(RuntimeError):
         operation: str,
         status_code: int | None = None,
         response_body: str | None = None,
-        failure_category: IntegrationFailureCategory | None = None,
     ) -> None:
         super().__init__(message)
         self.provider = provider
         self.model = model
         self.operation = operation
         self.status_code = status_code
-        self.failure_category = failure_category
         self.response_body = compact_log_text(
             response_body, limit=MAX_LOGGED_ERROR_BODY_CHARS
         )

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -11,16 +11,15 @@ from app.integrations.errors import IntegrationRequestError
 from app.integrations.llama_client import LlamaClient
 
 
-def test_llama_client_disables_opaque_sdk_retries_and_reuses_client(
+def test_llama_client_disables_opaque_sdk_retries_and_returns_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     constructor_kwargs: dict[str, Any] = {}
-    requests: list[dict[str, Any]] = []
-    close_count = 0
+    request_kwargs: dict[str, Any] = {}
 
     class FakeCompletions:
         async def create(self, **kwargs: Any) -> Any:
-            requests.append(kwargs)
+            request_kwargs.update(kwargs)
             return SimpleNamespace(
                 choices=[
                     SimpleNamespace(
@@ -34,48 +33,34 @@ def test_llama_client_disables_opaque_sdk_retries_and_reuses_client(
             constructor_kwargs.update(kwargs)
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-        async def close(self) -> None:
-            nonlocal close_count
-            close_count += 1
-
     monkeypatch.setattr("app.integrations.llama_client.AsyncOpenAI", FakeAsyncOpenAI)
-    settings = SimpleNamespace(
-        local_llama_enabled=True,
-        local_solver_llama_base_url="http://localhost:18080",
-        local_solver_llama_model="local-test-model",
-        local_solver_llama_timeout_seconds=2.0,
+    client = LlamaClient()
+    client.settings = cast(
+        Any,
+        SimpleNamespace(
+            local_llama_enabled=True,
+            local_solver_llama_base_url="http://localhost:18080",
+            local_solver_llama_model="local-test-model",
+            local_solver_llama_timeout_seconds=2.0,
+        ),
     )
-    client = LlamaClient(settings)
 
-    async def run_requests() -> tuple[dict[str, Any], dict[str, Any]]:
-        try:
-            first = await client.generate_json(
-                prompt="Return JSON.",
-                model="tiny-routing-model",
-                thinking_budget_tokens=0,
-                timeout_seconds=1.0,
-                operation="local_geometry_extraction",
-                trace_id="retry-test",
-            )
-            second = await client.generate_json(
-                prompt="Return JSON again.",
-                model="tiny-routing-model",
-                timeout_seconds=1.0,
-            )
-            return first, second
-        finally:
-            await client.aclose()
-
-    first_result, second_result = asyncio.run(run_requests())
+    result = asyncio.run(
+        client.generate_json(
+            prompt="Return JSON.",
+            model="tiny-routing-model",
+            thinking_budget_tokens=0,
+            timeout_seconds=1.0,
+            operation="local_geometry_extraction",
+            trace_id="retry-test",
+        )
+    )
 
     assert constructor_kwargs["max_retries"] == 0
     assert constructor_kwargs["base_url"] == "http://localhost:18080/v1"
-    assert len(requests) == 2
-    assert requests[0]["model"] == "tiny-routing-model"
-    assert requests[0]["extra_body"] == {"thinking_budget_tokens": 0}
-    assert first_result == {"ok": True}
-    assert second_result == {"ok": True}
-    assert close_count == 1
+    assert request_kwargs["model"] == "tiny-routing-model"
+    assert request_kwargs["extra_body"] == {"thinking_budget_tokens": 0}
+    assert result == {"ok": True}
 
 
 def test_llama_connection_refusal_logs_root_cause_and_opens_shared_circuit(
@@ -98,9 +83,6 @@ def test_llama_connection_refusal_logs_root_cause_and_opens_shared_circuit(
         def __init__(self, **kwargs: Any) -> None:
             self.chat = SimpleNamespace(completions=RefusingCompletions())
 
-        async def close(self) -> None:
-            return None
-
     monkeypatch.setattr(
         "app.integrations.llama_client.AsyncOpenAI", RefusingAsyncOpenAI
     )
@@ -111,87 +93,37 @@ def test_llama_connection_refusal_logs_root_cause_and_opens_shared_circuit(
         local_solver_llama_timeout_seconds=2.0,
         local_llama_unavailable_cooldown_seconds=60.0,
     )
-    first_client = LlamaClient(settings)
+    first_client = LlamaClient()
+    first_client.settings = cast(Any, settings)
 
-    async def run_requests() -> None:
-        with caplog.at_level(logging.WARNING), pytest.raises(IntegrationRequestError):
-            await first_client.generate_json(
+    with caplog.at_level(logging.WARNING), pytest.raises(IntegrationRequestError):
+        asyncio.run(
+            first_client.generate_json(
                 prompt="Return JSON.",
-                operation="local_unified_routing",
+                operation="local_route_classification",
                 trace_id="connection-refusal-test",
             )
+        )
 
-        assert request_count == 1
-        assert first_client.available is False
-        second_client = LlamaClient(settings)
-        with pytest.raises(IntegrationRequestError, match="temporarily unavailable"):
-            await second_client.generate_json(
-                prompt="Return JSON.",
-                operation="local_geometry_extraction",
-                trace_id="same-request-or-next-request",
-            )
-        await first_client.aclose()
-        await second_client.aclose()
-
-    asyncio.run(run_requests())
-
+    assert request_count == 1
+    assert first_client.available is False
     failure_log = next(
         record.getMessage()
         for record in caplog.records
         if "Llama-server request failed" in record.getMessage()
     )
-    assert "operation=local_unified_routing" in failure_log
+    assert "operation=local_route_classification" in failure_log
     assert "Connection error" in failure_log
     assert "ConnectError: [Errno 111] Connection refused" in failure_log
-    assert request_count == 1
 
-
-def test_llama_client_supports_mock_transport_and_closes_pool() -> None:
-    requests: list[httpx.Request] = []
-    settings = SimpleNamespace(
-        local_llama_enabled=True,
-        local_solver_llama_base_url="http://llama.test",
-        local_solver_llama_model="local-test-model",
-        local_solver_llama_timeout_seconds=2.0,
-    )
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "chatcmpl-test",
-                "object": "chat.completion",
-                "created": 1,
-                "model": "local-test-model",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": '{"ok":true}',
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            },
+    second_client = LlamaClient()
+    second_client.settings = cast(Any, settings)
+    with pytest.raises(IntegrationRequestError, match="temporarily unavailable"):
+        asyncio.run(
+            second_client.generate_json(
+                prompt="Return JSON.",
+                operation="local_geometry_extraction",
+                trace_id="same-request-or-next-request",
+            )
         )
-
-    client = LlamaClient(settings, transport=httpx.MockTransport(handler))
-    underlying_client = client.http_client
-
-    async def run_requests() -> None:
-        for _ in range(2):
-            assert await client.generate_json(prompt="Return JSON.") == {"ok": True}
-            assert client.http_client is underlying_client
-            assert underlying_client.is_closed is False
-        await client.aclose()
-
-    asyncio.run(run_requests())
-
-    assert [request.url.path for request in requests] == [
-        "/v1/chat/completions",
-        "/v1/chat/completions",
-    ]
-    assert underlying_client.is_closed is True
+    assert request_count == 1

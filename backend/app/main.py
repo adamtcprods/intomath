@@ -8,7 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import router as api_router
 from app.core.config import get_settings
-from app.dependencies import create_shared_model_clients
+from app.db import models as _models  # noqa: F401 -- Register SQLAlchemy models.
+from app.db.base import Base
+from app.db.session import engine
+from app.integrations.llama_client import LlamaClient
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -22,34 +25,21 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    model_clients = create_shared_model_clients(settings)
-    app.state.model_clients = model_clients
-    try:
-        if model_clients.semantic_router is not None:
-            semantic_status = await model_clients.semantic_router.initialize_async()
-            if semantic_status.enabled and semantic_status.state != "ready":
-                logger.warning(
-                    "Semantic router is configured but unavailable at startup "
-                    "model_source=%s error_category=%s; LLM fallback remains enabled",
-                    semantic_status.model_source,
-                    semantic_status.error_category,
-                )
-        if settings.local_llama_enabled:
-            available = await model_clients.llama.probe_health(
-                timeout_seconds=settings.local_llama_startup_probe_timeout_seconds
+    # Startup: create all tables if they don't exist.
+    Base.metadata.create_all(bind=engine)
+    if settings.local_llama_enabled:
+        llama_client = LlamaClient()
+        available = await llama_client.probe_health(
+            timeout_seconds=settings.local_llama_startup_probe_timeout_seconds
+        )
+        if not available:
+            logger.warning(
+                "Local llama.cpp is configured but unavailable at startup base_url=%s; "
+                "local model stages will be skipped during the connectivity cooldown",
+                settings.local_solver_llama_base_url,
             )
-            if not available:
-                logger.warning(
-                    "Local llama.cpp is configured but unavailable at startup base_url=%s; "
-                    "local model stages will be skipped during the connectivity cooldown",
-                    settings.local_solver_llama_base_url,
-                )
-        yield
-    finally:
-        try:
-            await model_clients.aclose()
-        finally:
-            del app.state.model_clients
+    yield
+    # Shutdown: nothing to tear down for SQLite; pool is closed by GC
 
 
 app = FastAPI(

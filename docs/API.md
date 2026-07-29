@@ -235,7 +235,7 @@ If `image_base64` is present:
 If `include_visualization` is true:
 1. the tiny router model selects the visualization environment; `none` stops the visualization flow here
 2. the tiny model expands the request into semantic GeoGebra search terms and a bounded set of at most 10 relevant commands is retrieved from the local catalog
-3. the healthy local llama.cpp parser emits typed DSL when enabled and the prompt is within 4,000 characters; otherwise extraction starts with the preferred NVIDIA fallback
+3. a model emits typed DSL; if every model-backed parser fails, no visualization is emitted
 4. schema, command selection, signature/type/environment and dependency validation run
 5. a remote plan with action-scoped validation errors gets at most one compact repair turn, followed by full re-validation
 6. trusted code translates the sorted DSL into GeoGebra commands
@@ -244,13 +244,10 @@ If `include_visualization` is true:
 Remote solve and geometry requests supply strict JSON schemas in their prompts and
 validate each response locally. A provider failure is logged and
 warned separately from a model plan that parsed but failed deterministic validation.
-Geometry tries the validated local llama.cpp parser first, then NVIDIA direct
-gpt-oss-20b and gpt-oss-120b as preferred and alternate remote sources. Every proposed
-DSL—including NVIDIA direct output—runs through the same authoritative validators.
-HTTP 429, timeout, connectivity failure, invalid JSON/schema, and deterministic DSL
-rejection are distinct internal failure categories. No remote provider/model extraction
-is repeated; a valid-schema DSL failure may receive one action-scoped repair before one
-alternate source is considered. All attempts share the overall solve request deadline.
+Geometry then tries the validated local llama.cpp parser, NVIDIA direct gpt-oss-120b
+and gpt-oss-20b in that order. Every proposed DSL—including NVIDIA direct output—runs through the same
+authoritative validators. Invalid output follows this chain too; it does not stop at an
+invalid but parseable DSL.
 
 Remote attempts have a 25-second default hard timeout. Only direct gpt-oss-120b
 receives a model-specific 50-second cold-start allowance. Structured solve tries the

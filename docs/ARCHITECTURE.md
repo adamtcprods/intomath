@@ -19,24 +19,17 @@ flowchart TD
     A[User input] --> B[Frontend workspace]
     B --> C[POST /api/v1/solve]
     C --> D[OCR step if image is present]
-    D --> X[Exact deterministic solver attempt]
-    X -->|accepted| J
-    X -->|declined| E[Multilingual embedding router]
-    E -->|uncertain or unavailable| M[LLM classification fallback]
-    E -->|confident| L[Existing solver route]
-    M --> L
+    D --> E[Model router]
+    E --> L[Local solver selector]
     L --> F[Structured solve generation]
     E --> G[Geometry extraction]
-    M --> G
     G --> H[Semantic query expansion + bounded command retrieval]
     H --> I[Typed Geometry DSL 1.1]
     I --> V[Schema + signature + type + dependency validation]
     V --> T[Deterministic GeoGebra translator]
     F --> J[Structured response assembly]
     T --> J
-    J --> K[Response cache]
-    J --> P[Result repository]
-    P --> Q[Thread-owned SQLAlchemy session]
+    J --> K[Cache + persistence]
     J --> R[Sequential applet runtime validation]
     R --> U[Frontend answer, steps, and visualization]
 ```
@@ -84,7 +77,7 @@ flowchart TD
 - `app/main.py`
   - FastAPI app setup
   - CORS middleware
-  - shared model-client lifecycle; database schemas are managed by Alembic
+  - startup table creation
 - `app/api/v1/endpoints/solve.py`
   - `POST /api/v1/solve`
 - `app/api/v1/endpoints/health.py`
@@ -93,34 +86,25 @@ flowchart TD
 ### Service layer
 
 - `solver_service.py`
-  - session-free dependency facade and structured-solve implementation
-- `solver_pipeline/orchestration.py`
-  - readable request flow, cache/single-flight coordination, visualization, response assembly, and persistence hand-off
-- `core/model_policy.py`
-  - shared model names, endpoint order, attempt timeouts, solve routes, and failure labels
-- `core/solve_metrics.py`
-  - request-scoped timing, model-attempt counters, cache status, and one structured summary log
-- `repositories/result_repository.py`
-  - best-effort attempt, run, trace ID, and timing persistence
-  - creates, rolls back, and closes a synchronous session inside one worker thread
-- `alembic/`
-  - managed production database schema and revisions
+  - main orchestration layer
+  - OCR
+  - routing
+  - solving
+  - visualization extraction
+  - translation
+  - persistence
+  - response caching
 - `model_router.py`
-  - embedding-first facade for independent subject, difficulty, and visualization classification
-  - one schema-constrained local-LLM fallback on uncertainty or embedding unavailability
-  - explicit unclassified route if both classifiers are unavailable or invalid
-- `semantic_router.py`
-  - one process-local multilingual sentence-transformer per worker
-  - independent normalized prototype banks, per-axis calibration, and OOD gating
-  - separate nearest-example visualization-term retrieval
+  - schema-constrained local-AI classification of subject, difficulty, and visualization environment
+  - explicit unclassified route when the model is unavailable or invalid
 - `local_solver_selector.py`
-  - re-parses the original prompt before every deterministic execution
-  - never treats embedding labels or normalization hints as execution authority
+  - lets the local llama.cpp model select and normalize a narrow deterministic execution tool
+  - never sends geometry through the pre-model deterministic path
 - `ocr_service.py`
   - image-to-structured-text stage through local DeepSeek OCR
 - `geometry_extractor.py`
-  - validated, schema-constrained local llama.cpp extraction as the primary visualization parser
-  - typed NVIDIA fallback and action-scoped repair policy
+  - validated, schema-constrained DSL extraction through the local llama.cpp model for local solve routes
+  - remote model extraction for model-backed geometry routes
   - tiny-model semantic catalog query expansion, bounded to 10 retrieved commands
   - returns no visualization when every model-backed parser fails
 - `geogebra_translator.py`
@@ -130,107 +114,42 @@ flowchart TD
 - `geogebra_validator.py`
   - label/type/environment/allowlist/dependency validation and topological ordering
 - `fallback_solver.py`
-  - safe deterministic parsing/evaluation for exactly supported arithmetic and algebra shapes
-  - is never authorized by a semantic embedding label
+  - deterministic execution for AI-selected arithmetic/algebra shapes and last-resort solve fallback
 - `cache.py`
   - in-memory TTL response cache
 
-### Final `POST /api/v1/solve` path
-
-The endpoint resolves one `SolverService` from FastAPI dependencies and calls
-`service.solve()`. The final backend path is:
-
-1. Allocate a request ID, deadline, and request-scoped metrics collector.
-2. Validate bounded text/image input and run OCR when image bytes exist.
-3. Build the response-cache key. Return a copied cache hit immediately, or join
-   the per-key single-flight so concurrent identical misses share one computation.
-4. Try the deterministic exact solver against the original prompt before any
-   semantic model call.
-5. If exact solving declines, run the multilingual embedding router once. Use
-   confident problem-type and visualization labels directly; uncertain difficulty
-   becomes `medium`, while uncertainty in a required axis can invoke one retained
-   LLM classification fallback. The selected existing route then performs one
-   bounded structured-solve endpoint sequence.
-6. When requested and routed, extract validated visualization DSL and translate
-   it deterministically to GeoGebra commands. Visualization failure stays fail-open.
-7. Assemble the unchanged `SolveResponse`, cache usable responses, and
-   best-effort persist the result.
-8. Emit one JSON `solve_metrics` log with total, OCR, routing, solver,
-   visualization, and persistence duration; cache/single-flight status; total
-   model calls; and provider/model/operation attempt counts.
-
-The application remains one FastAPI monolith. The modules above are internal
-boundaries, not separately deployed services.
-
 ## Routing architecture
 
-After exact parsing declines, the optional multilingual encoder
-`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` classifies prompts
-against independent prototype banks for:
+The local tiny model classifies prompts into:
 
-- problem type: `arithmetic`, `algebra`, `number_theory`, `geometry`,
-  `trigonometry`, `calculus`, `statistics`, `probability`, or `general`;
-- difficulty: `easy`, `medium`, or `hard`;
-- visualization: `none`, `geometry_2d`, `graphing`, `graphics_3d`, `cas`,
-  `probability`, `statistics`, or `spreadsheet`.
+- `arithmetic`
+- `algebra`
+- `number_theory`
+- `geometry`
+- `trigonometry`
+- `calculus`
+- `statistics`
+- `probability`
+- `general`
 
-Each axis has a separately calibrated temperature, confidence, and top-two
-margin. The problem-type nearest-centroid similarity supplies an OOD gate.
-Confident type/visualization with uncertain difficulty uses the safe `medium`
-default without an LLM call. Uncertain required axes, OOD, overlength, invalid
-artifacts, or unavailable local model files can invoke the existing constrained
-llama.cpp classifier once. Labels from the embedding and LLM classifiers are not
-mixed. If fallback is disabled or fails, routing stays explicitly
-`general`/`medium` with no visualization and carries the `left unclassified`
-marker.
-
-The embedding model is loaded once per FastAPI worker during lifespan and only
-from local files or cache. Runtime requests never download model files. Health
-reports disabled/loading/ready/unavailable state, source/path, artifact identity,
-load time, dimensions, prototype count, and approximate memory. Request metrics
-record routing origin, abstention reason, confidence/margin, embedding inference
-count/latency, and LLM fallback count. The checked-in 216-row starter corpus is
-AI-authored and all rows remain `needs_review`; its locked-set measurements are
-not production accuracy claims.
-
-The exact parser is the only authority for deterministic execution. A semantic
-`arithmetic` or `algebra` label selects subject routing, not executable syntax;
-the original prompt must still pass the deterministic grammar. Visualization
-term retrieval is a separate nearest-example lookup and cannot make a
-classification pass.
+It selects difficulty and visualization environment in the same constrained JSON
+response. If that response is unavailable or invalid, routing remains explicitly
+`general`/`medium` with no visualization environment; backend keywords do not guess
+the missing classification.
 
 ### Model policy
 
 | Use case | Model / route |
 |---|---|
-| Exactly supported arithmetic, linear equations, and quadratic graph analysis | `local:deterministic-solver` before semantic routing |
-| Primary multilingual semantic routing | `paraphrase-multilingual-MiniLM-L12-v2` with local independent prototype banks |
-| Uncertain semantic classification | one constrained `LFM2.5-8B-A1B` llama.cpp fallback |
-| Local trivia and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
+| AI-selected arithmetic, linear equations, and quadratic graph analysis | `local:deterministic-solver`; exact parsing is an execution gate after AI selection |
+| Local semantic routing, normalization, trivia, catalog-query expansion, and schema-constrained visualization extraction | `unsloth/LFM2.5-8B-A1B-GGUF:Q4_K_XL` via llama-server; deterministic validation remains authoritative |
 | Easy algebra / arithmetic outside deterministic coverage | `openai/gpt-oss-20b` via NVIDIA NIM |
 | Hard geometry / proofs / multi-step reasoning | `openai/gpt-oss-120b` via NVIDIA NIM |
-| Structured-solve fallback | Preferred NVIDIA gpt-oss model → alternate gpt-oss model, with bounded reasoning and deterministic post-validation |
-| Geometry fallback | Healthy local llama.cpp parser → gpt-oss-20b → gpt-oss-120b, subject to typed failure policy and the request deadline |
+| Model fallback | NVIDIA NIM order: gpt-oss-120b → gpt-oss-20b, with bounded reasoning and deterministic post-validation |
 | OCR / image extraction | `deepseek-ai/deepseek-ocr-2` locally |
 
 Structured-solve fallback order is explicit: the preferred and alternate NVIDIA NIM
-gpt-oss models. Geometry has its own lower-latency policy: the validated local parser is
-primary when enabled, healthy, and within its supported prompt length; gpt-oss-20b is
-the preferred remote fallback and gpt-oss-120b is the alternate.
-
-Geometry fallback is driven by typed failure categories and actions:
-
-| Failure | Action |
-|---|---|
-| Local unavailable, timeout, invalid JSON/schema, or invalid DSL | Try preferred remote |
-| Remote 429, timeout, connectivity, invalid JSON/schema, or provider error | Try one alternate model if deadline remains |
-| Valid remote schema with invalid DSL | Try one action-scoped repair |
-| Failed or still-invalid repair | Try one alternate model if deadline remains |
-| Exhausted request deadline or unclassified remote failure | Stop |
-
-Each extraction keeps an internal structured attempt record with provider, model,
-operation, duration, outcome, and failure category. A provider/model/operation key
-cannot run twice, and a proposal can be repaired only once.
+gpt-oss models. Geometry uses the same entries after the local llama safety net.
 
 ## GeoGebra trust boundary
 
@@ -263,9 +182,8 @@ answer tuples absent from the normalized problem statement.
 
 Remote solve and geometry requests include strict response schemas in their prompts and
 validate responses locally. Provider/schema unavailability is distinct from invalid
-model output. Geometry starts with the constrained local parser and then uses explicitly
-named NVIDIA NIM models according to the failure matrix above. If no model returns a
-valid plan, visualization stays empty. The
+model output. Geometry falls through to the constrained local parser and the explicitly
+named NVIDIA NIM models. If no model returns a valid plan, visualization stays empty. The
 published closed NVIDIA `ChatRequest` schemas for these models omit `response_format`,
 so non-streaming output is explicitly treated as an unenforced proposal. gpt-oss uses
 low reasoning effort. The same authoritative payload,

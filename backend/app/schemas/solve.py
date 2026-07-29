@@ -47,15 +47,12 @@ class ProblemInput(BaseModel):
             raise ValueError(
                 "At least one of 'text' or 'image_base64' must be provided."
             )
-        if has_image and self.image_mime_type is None:
-            raise ValueError(
-                "'image_mime_type' is required when 'image_base64' is provided."
-            )
-        if has_image and self.image_mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
-            raise ValueError(
-                f"Unsupported image_mime_type '{self.image_mime_type}'. "
-                f"Must be one of: {sorted(_SUPPORTED_IMAGE_MIME_TYPES)}."
-            )
+        if has_image and self.image_mime_type is not None:
+            if self.image_mime_type not in _SUPPORTED_IMAGE_MIME_TYPES:
+                raise ValueError(
+                    f"Unsupported image_mime_type '{self.image_mime_type}'. "
+                    f"Must be one of: {sorted(_SUPPORTED_IMAGE_MIME_TYPES)}."
+                )
         return self
 
 

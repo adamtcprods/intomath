@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from app.core.model_policy import (
-    EASY_MODEL,
-    HARD_MODEL,
-    LOCAL_DETERMINISTIC_SOLVER_MODEL,
-    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
-    LOCAL_LLAMA_TRIVIA_MODEL,
-    SolveRoute,
-)
 from app.services.local_solver_selector import (
     LOCAL_SOLVER_MIN_CONFIDENCE,
     UNSUPPORTED_LOCAL_SOLVER_MARKER,
 )
 from app.services.local_solver_types import LocalSolveResult
-from app.services.model_router import RoutingDecision
+from app.services.model_router import (
+    LOCAL_DETERMINISTIC_SOLVER_MODEL,
+    LOCAL_LLAMA_GEOMETRY_PARSER_MODEL,
+    LOCAL_LLAMA_TRIVIA_MODEL,
+    RoutingDecision,
+)
 
 from .response_builder import StructuredSolveDraft
 
@@ -53,10 +50,6 @@ def with_local_solver_routing(
         visualization_environment=routing.visualization_environment,
         reason="; ".join(reason_parts),
         visualization_search_terms=routing.visualization_search_terms,
-        solve_route=(
-            SolveRoute.local_trivia if is_trivia else SolveRoute.deterministic
-        ),
-        normalized_prompt=local_result.normalized_text,
     )
 
 
@@ -74,8 +67,6 @@ def with_structured_solver_routing(
         visualization_environment=routing.visualization_environment,
         reason=f"{routing.reason}; result produced by {solver_model}",
         visualization_search_terms=routing.visualization_search_terms,
-        solve_route=SolveRoute.remote,
-        normalized_prompt=routing.normalized_prompt,
     )
 
 
@@ -91,30 +82,6 @@ def with_local_subquestion_routing(
         visualization_environment=routing.visualization_environment,
         reason=f"{routing.reason}; deterministic local solver used because it {reason}",
         visualization_search_terms=routing.visualization_search_terms,
-        solve_route=SolveRoute.deterministic,
-        normalized_prompt=routing.normalized_prompt,
-    )
-
-
-def with_remote_solver_routing(
-    routing: RoutingDecision,
-    *,
-    reason: str,
-) -> RoutingDecision:
-    solver_model = (
-        HARD_MODEL if routing.difficulty.value == "hard" else EASY_MODEL
-    )
-    return RoutingDecision(
-        problem_type=routing.problem_type,
-        difficulty=routing.difficulty,
-        parser_model=routing.parser_model,
-        solver_model=solver_model,
-        vision_model=routing.vision_model,
-        visualization_environment=routing.visualization_environment,
-        reason=f"{routing.reason}; {reason}",
-        visualization_search_terms=routing.visualization_search_terms,
-        solve_route=SolveRoute.remote,
-        normalized_prompt=routing.normalized_prompt,
     )
 
 
@@ -147,7 +114,6 @@ __all__ = [
     "is_supported_local_draft",
     "with_local_solver_routing",
     "with_local_subquestion_routing",
-    "with_remote_solver_routing",
     "with_structured_solver_routing",
     "without_backend_config_warnings",
 ]

@@ -15,9 +15,6 @@ class SolverRun(Base):
     attempt_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("problem_attempts.id"), nullable=False, index=True
     )
-    request_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, unique=True, index=True
-    )
     parser_model: Mapped[str] = mapped_column(String(128), nullable=False)
     solver_model: Mapped[str] = mapped_column(String(128), nullable=False)
     vision_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -27,27 +24,6 @@ class SolverRun(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     cached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
-    request_started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    solve_completed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    solve_duration_ms: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    solver_duration_ms: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    visualization_duration_ms: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    persistence_duration_ms: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
-    total_duration_ms: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

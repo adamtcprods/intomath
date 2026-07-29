@@ -39,16 +39,14 @@ class LocalDeepSeekOCR:
     async def extract_text(
         self,
         *,
-        image_base64: str | None = None,
-        image_bytes: bytes | None = None,
+        image_base64: str,
         mime_type: str = "image/png",
         as_markdown: bool = False,
     ) -> str:
         """Return raw OCR text from DeepSeek-OCR-2.
 
         Args:
-            image_base64: Base64-encoded image bytes for direct callers.
-            image_bytes: Already-decoded bytes from the bounded API validator.
+            image_base64: Base64-encoded image or PDF bytes.
             mime_type: MIME type of the input ("image/png", "image/jpeg",
                        "application/pdf", etc.).
             as_markdown: If True, use the document-to-markdown prompt. Useful
@@ -59,10 +57,7 @@ class LocalDeepSeekOCR:
             RuntimeError: If required dependencies are missing.
             ValueError: If the image cannot be decoded or OCR output is missing.
         """
-        if image_bytes is None:
-            if image_base64 is None:
-                raise ValueError("Image bytes or Base64 image data are required.")
-            image_bytes = _decode_base64_payload(image_base64)
+        image_bytes = _decode_base64_payload(image_base64)
         image_path = _write_temp_image(image_bytes, mime_type)
         prompt = PROMPT_MARKDOWN if as_markdown else PROMPT_FREE_OCR
 

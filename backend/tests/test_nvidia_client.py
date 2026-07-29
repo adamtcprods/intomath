@@ -6,12 +6,12 @@ from typing import Any
 import httpx
 import pytest
 
-from app.core.model_policy import (
+from app.integrations.errors import IntegrationRequestError
+from app.integrations.nvidia_client import NvidiaClient
+from app.services.model_router import (
     NVIDIA_GPT_OSS_20B_MODEL,
     NVIDIA_GPT_OSS_120B_MODEL,
 )
-from app.integrations.errors import IntegrationRequestError
-from app.integrations.nvidia_client import NvidiaClient
 
 
 def _settings() -> SimpleNamespace:
@@ -60,7 +60,6 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
                 "additionalProperties": False,
             },
             schema_name="test_schema",
-            max_tokens=1_234,
             operation="structured_math_solution",
             trace_id="nvidia-family-test",
         )
@@ -71,7 +70,6 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
     payload = requests[0]
     assert payload["model"] == model
     assert payload["stream"] is False
-    assert payload["max_tokens"] == 1_234
     assert "response_format" not in payload
     assert "Required JSON schema" in payload["messages"][0]["content"]
     assert "JSON-escape every backslash" in payload["messages"][0]["content"]
@@ -87,7 +85,7 @@ def test_nvidia_payload_uses_family_controls_without_unsupported_response_format
         ("structured_math_steps_repair", "medium"),
         ("structured_math_solution_repair", "medium"),
         ("geometry_extraction", "low"),
-        ("local_unified_routing", "low"),
+        ("local_route_classification", "low"),
     ],
 )
 def test_nvidia_reasoning_effort_matches_operation(
@@ -118,43 +116,6 @@ def test_nvidia_http_error_exposes_bounded_status_and_body() -> None:
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.response_body == error_body
-
-
-def test_nvidia_client_reuses_one_mock_transport_pool_and_closes() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "model": NVIDIA_GPT_OSS_20B_MODEL,
-                "choices": [{"message": {"content": '{"ok":true}'}}],
-            },
-        )
-
-    client = NvidiaClient(_settings(), transport=httpx.MockTransport(handler))
-    underlying_client = client.http_client
-
-    async def run_requests() -> None:
-        for _ in range(2):
-            assert (
-                await client.complete_json(
-                    model=NVIDIA_GPT_OSS_20B_MODEL,
-                    system_prompt="Return JSON.",
-                    user_prompt="Test",
-                )
-                == {"ok": True}
-            )
-            assert client.http_client is underlying_client
-            assert underlying_client.is_closed is False
-        await client.aclose()
-
-    asyncio.run(run_requests())
-
-    assert len(requests) == 2
-    assert underlying_client.is_closed is True
 
 
 def test_nvidia_parser_prefers_complete_schema_object_over_earlier_fragment() -> None:
