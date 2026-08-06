@@ -69,7 +69,10 @@ export function SolveWorkspace() {
 
   const activePrompt = input.trim();
   const geogebra = result?.visualization.geogebra;
-  const commands = geogebra?.commands ?? [];
+  const commands = useMemo(
+    () => geogebra?.commands ?? [],
+    [geogebra?.commands],
+  );
   const visualizationEnvironment =
     geogebra?.environment ??
     result?.visualization.dsl?.environment ??

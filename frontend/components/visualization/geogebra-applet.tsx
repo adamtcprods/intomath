@@ -97,7 +97,6 @@ function loadGeoGebraScriptFrom(index: number): Promise<void> {
         : document.createElement("script");
     const shouldAppend = !script.isConnected;
     let settled = false;
-    let timeoutId: number;
 
     const cleanup = () => {
       window.clearTimeout(timeoutId);
@@ -149,7 +148,10 @@ function loadGeoGebraScriptFrom(index: number): Promise<void> {
     script.dataset.geogebraStatus = "loading";
     script.addEventListener("load", handleLoad, { once: true });
     script.addEventListener("error", handleError, { once: true });
-    timeoutId = window.setTimeout(handleTimeout, GEOGEBRA_SCRIPT_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(
+      handleTimeout,
+      GEOGEBRA_SCRIPT_TIMEOUT_MS,
+    );
 
     if (shouldAppend) {
       document.body.appendChild(script);

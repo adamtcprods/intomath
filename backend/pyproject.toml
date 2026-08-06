@@ -4,23 +4,24 @@ version = "0.1.0"
 description = "IntoMath backend"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi>=0.115.14",
-  "uvicorn[standard]>=0.35.0",
-  "pydantic>=2.11.7",
-  "pydantic-settings>=2.10.1",
-  "sqlalchemy>=2.0.41",
-  "psycopg[binary]>=3.2.9",
+  "fastapi>=0.141.1",
+  "uvicorn[standard]>=0.52.1",
+  "pydantic>=2.13.4",
+  "pydantic-settings>=2.14.2",
+  "sqlalchemy>=2.0.51",
+  "psycopg[binary]>=3.3.4",
   "httpx>=0.28.1",
 
-  "pillow>=11.0.0",
-  "torch>=2.5.0",
-  "transformers>=4.47.0",
-  "openai>=2.0.0"
+  "pillow>=12.3.0",
+  "torch>=2.13.0",
+  "transformers>=5.14.1",
+  "openai>=2.53.0"
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.4.1",
+  "httpx2>=2.7.0",
+  "pytest>=9.1.1",
 ]
 
 [build-system]
