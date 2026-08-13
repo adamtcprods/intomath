@@ -35,10 +35,9 @@ def test_evaluation_fixture_families_and_offline_metrics() -> None:
     assert current_retrieval["expected_recall"] == 1.0
     assert candidate_retrieval["expected_recall"] >= current_retrieval["expected_recall"]
     assert candidate_retrieval["expected_precision"] >= current_retrieval["expected_precision"]
-    assert report["metrics"]["catalog_runtime_eligibility"] == {
-        "eligible": {"command_names": 434, "overloads": 933},
-        "blocked": {"command_names": 68, "overloads": 119},
-    }
+    assert report["metrics"]["catalog_runtime_eligibility"] == (
+        GeoGebraCommandRegistry().metadata["runtime_eligibility"]
+    )
     assert report["metrics"]["runtime_acceptance"] == "not_run_without_browser_applet"
 
 

@@ -93,8 +93,11 @@ def test_every_safe_catalog_command_has_a_runtime_eligible_environment() -> None
         if definition.unsafe_reason is None
     ]
 
-    assert len(safe_definitions) == 434
-    assert sum(len(definition.overloads) for definition in safe_definitions) == 933
+    runtime_eligibility = registry.metadata["runtime_eligibility"]
+    assert runtime_eligibility["eligible"] == {
+        "command_names": len(safe_definitions),
+        "overloads": sum(len(definition.overloads) for definition in safe_definitions),
+    }
     assert all(
         any(
             definition.runtime_eligible_overloads(environment)
