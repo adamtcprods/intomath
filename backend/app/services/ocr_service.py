@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
 from app.integrations.local_deepseek_ocr import LocalDeepSeekOCR
+
+
+logger = logging.getLogger(__name__)
+
+
+class OCRExtractionError(RuntimeError):
+    """Base error for OCR failures that prevent an image-only solve."""
+
+
+class OCRInputError(OCRExtractionError):
+    """The uploaded image could not provide usable problem text."""
+
+
+class OCRUnavailableError(OCRExtractionError):
+    """The local OCR runtime could not process the request."""
 
 
 @dataclass
@@ -29,18 +45,24 @@ class OCRService:
                 image_base64=image_base64,
                 mime_type=mime_type or "image/png",
             )
+        except ValueError as exc:
+            logger.warning("OCR could not process the uploaded image", exc_info=True)
+            raise OCRInputError(
+                "OCR could not process the uploaded image. Check that it is a valid, "
+                "readable image and try again."
+            ) from exc
         except Exception as exc:
-            return OCRResult(
-                raw_text="",
-                cleaned_text="",
-                confidence=0.0,
-                warning=f"Local DeepSeek OCR failed — image text was not extracted: {exc}",
-            )
+            logger.exception("Local DeepSeek OCR failed")
+            raise OCRUnavailableError(
+                "OCR is temporarily unavailable. Try again later or enter the problem "
+                "as text."
+            ) from exc
 
-        if not raw_text:
-            # Model returned nothing — surface this clearly rather than
-            # passing empty strings silently to the solver router.
-            return None
+        if not raw_text or not raw_text.strip():
+            raise OCRInputError(
+                "OCR could not extract usable text from the uploaded image. Try a "
+                "clearer image or enter the problem as text."
+            )
 
         cleaned_text = _clean_for_solver(raw_text)
         confidence = _estimate_confidence(raw_text)
@@ -69,8 +91,7 @@ def _clean_for_solver(text: str) -> str:
     """Normalise raw OCR output into a solver-friendly string.
 
     - Collapse stray whitespace and line breaks inside expressions.
-    - Replace common OCR confusables (e.g. 'x' as multiplication vs variable
-      is left to the solver; we only fix unambiguous visual artefacts).
+    - Normalize typographic operators while preserving variable and point labels.
     - Strip leading/trailing noise.
     """
     # Collapse runs of whitespace into a single space, but preserve
@@ -78,10 +99,8 @@ def _clean_for_solver(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # Common OCR confusables in math contexts
+    # Normalize typographic operators without guessing whether letters are digits.
     replacements = [
-        (r"(?<!\w)O(?!\w)", "0"),  # standalone letter O → digit 0
-        (r"(?<!\w)l(?!\w)", "1"),  # standalone lowercase l → digit 1
         (r"\u00d7", "*"),  # × → *
         (r"\u00f7", "/"),  # ÷ → /
         (r"\u2212", "-"),  # − (minus sign) → hyphen-minus

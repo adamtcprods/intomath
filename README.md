@@ -218,9 +218,17 @@ The frontend uses Bun as its package manager. `frontend/bun.lock` is the canonic
 ### Backend
 ```bash
 python3 -m venv .venv-local
-.venv-local/bin/pip install -r backend/requirements.txt
+.venv-local/bin/pip install --upgrade pip
+.venv-local/bin/pip install -e "./backend[dev]"
+# Required for local image OCR (CUDA GPU/toolchain required):
+.venv-local/bin/pip install --no-build-isolation -e "./backend[ocr]"
 .venv-local/bin/uvicorn app.main:app --app-dir backend --reload
 ```
+
+`backend/pyproject.toml` is the canonical backend dependency manifest. The base
+install includes Pillow, Torch, and Transformers; the separate `ocr` extra adds
+the pinned Flash Attention build after Torch is installed. See `docs/SETUP.md`
+for GPU requirements and text-only setup.
 
 Frontend default URL: `http://localhost:3000`
 

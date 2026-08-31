@@ -15,6 +15,7 @@ from app.schemas.solve import (
     VisualizationPayload,
 )
 from app.services.cache import TTLCache
+from app.services.ocr_service import OCRExtractionError, OCRInputError
 
 from .persistence import persist_solve_result
 from .response_builder import StructuredSolveDraft
@@ -64,10 +65,24 @@ async def solve_request(
         request.options.include_visualization,
     )
 
-    ocr_result = await service.ocr_service.extract_problem_text(
-        request.input.image_base64,
-        request.input.image_mime_type,
-    )
+    ocr_result = None
+    try:
+        ocr_result = await service.ocr_service.extract_problem_text(
+            request.input.image_base64,
+            request.input.image_mime_type,
+        )
+    except OCRExtractionError as exc:
+        logger.warning(
+            "OCR extraction failed request_id=%s has_typed_text=%s error=%s",
+            request_id,
+            bool(raw_text),
+            exc,
+        )
+        if not raw_text:
+            raise
+        warnings.append(str(exc))
+
+    ocr_warning = None
     if ocr_result:
         logger.info(
             "OCR extraction completed request_id=%s cleaned_text_chars=%s has_warning=%s",
@@ -81,6 +96,7 @@ async def solve_request(
                 request_id,
                 ocr_result.warning,
             )
+            ocr_warning = ocr_result.warning
             warnings.append(ocr_result.warning)
         if ocr_result.cleaned_text:
             normalized_text = (
@@ -88,6 +104,13 @@ async def solve_request(
                 if raw_text
                 else ocr_result.cleaned_text
             )
+
+    if request.input.image_base64 and not normalized_text:
+        raise OCRInputError(
+            ocr_warning
+            or "OCR could not extract usable text from the uploaded image. Try a "
+            "clearer image or enter the problem as text."
+        )
 
     detected_subquestions = detect_subquestions(normalized_text)
     cache_key = service._build_cache_key(normalized_text, request)

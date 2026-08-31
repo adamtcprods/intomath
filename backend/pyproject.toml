@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ocr = [
+  "flash-attn==2.7.3",
+]
 dev = [
   "httpx2>=2.7.0",
   "pytest>=9.1.1",
