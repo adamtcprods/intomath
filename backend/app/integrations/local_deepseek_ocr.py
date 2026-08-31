@@ -243,7 +243,8 @@ def _load_model(model_id: str) -> tuple[Any, Any]:
     if importlib.util.find_spec("flash_attn") is None:
         raise RuntimeError(
             "Local DeepSeek OCR requires flash-attn for flash_attention_2. "
-            "Install with: pip install flash-attn==2.7.3 --no-build-isolation"
+            "Install the project's OCR extra with --no-build-isolation as "
+            "documented in docs/SETUP.md."
         )
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(

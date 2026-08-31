@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.solve import SolveRequest, SolveResponse
+from app.services.ocr_service import OCRInputError, OCRUnavailableError
 from app.services.solver_service import SolverService
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,18 @@ async def solve_problem(
             response.cached,
         )
         return response
+    except OCRInputError as exc:
+        logger.info("Solve rejected because OCR found no usable input: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    except OCRUnavailableError as exc:
+        logger.exception("Solve failed because OCR is unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         logger.exception("Unexpected error in solve endpoint")
         raise HTTPException(

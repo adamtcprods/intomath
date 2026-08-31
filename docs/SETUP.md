@@ -31,12 +31,29 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 
 ## Backend setup
 
-Create a virtual environment and install dependencies:
+Create a virtual environment and install the backend from its canonical
+`pyproject.toml` metadata, including the test dependencies:
 
 ```bash
 python3 -m venv .venv-local
-.venv-local/bin/pip install -r backend/requirements.txt
+.venv-local/bin/pip install --upgrade pip
+.venv-local/bin/pip install -e "./backend[dev]"
 ```
+
+### Local OCR dependencies
+
+Image solving uses DeepSeek-OCR-2 locally. The base backend install supplies
+Pillow, Torch, and Transformers. OCR additionally requires an NVIDIA CUDA GPU,
+a compatible CUDA build toolchain, and Flash Attention. Install the OCR extra
+only after the base install so Torch is available to its non-isolated build:
+
+```bash
+.venv-local/bin/pip install --no-build-isolation -e "./backend[ocr]"
+```
+
+The `ocr` extra pins the Flash Attention version expected by the integration.
+The OCR runtime deliberately rejects CPU-only Torch installations; text-only
+solving remains available without the extra.
 
 ### Geometry DSL `1.1` artifact migration
 

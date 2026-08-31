@@ -74,7 +74,7 @@ from app.services.solver_pipeline.content_quality import (  # noqa: F401
 
 _RESPONSE_CACHE: TTLCache[SolveResponse] = TTLCache(ttl_seconds=900, max_size=500)
 logger = logging.getLogger(__name__)
-_CACHE_RESPONSE_VERSION = 5
+_CACHE_RESPONSE_VERSION = 6
 _VISUALIZATION_PIPELINE_VERSION = "geogebra-catalog-1.4-semantic-retrieval-v4-dimensions"
 
 
@@ -406,6 +406,7 @@ class SolverService:
             "catalog_generator_version": registry_metadata.get("generator_version"),
             "catalog_upstream_commit": registry_metadata.get("upstream_commit"),
             "text": normalized_text,
+            "has_image": bool(request.input.image_base64),
             "language": request.input.language,
             "options": request.options.model_dump(mode="json"),
         }
