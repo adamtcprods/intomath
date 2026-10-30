@@ -1,5 +1,5 @@
 {
-  "catalog_sha256": "891f53dc8a7ffb3f796d04ca2b8dd379c495d50250856abb2c4941989bddb94a",
+  "catalog_sha256": "b0f67dbfa4da7edcdccc0a9dc42d6b7d076f283801dd1834a3f8739a0751bbda",
   "command_names": 502,
   "command_pages_parsed": 502,
   "families": {
@@ -72,7 +72,7 @@
       "overloads": 52
     }
   },
-  "generation_timestamp": "2026-10-29T10:11:05.194066+00:00",
+  "generation_timestamp": "2026-10-30T10:14:56.509485+00:00",
   "generator_version": "1.4.0",
   "overloads": 1054,
   "runtime_eligibility": {
@@ -100,6 +100,6 @@
       "overloads": 4
     }
   },
-  "upstream_commit": "0c0bae74a93febfe70fe3228b7cbf69ab4c8b622",
+  "upstream_commit": "e371907eb500a3a59a52ad7f706b82ff52e903b7",
   "upstream_repository": "https://github.com/geogebra/manual"
 }
