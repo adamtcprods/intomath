@@ -1,5 +1,5 @@
 {
-  "catalog_sha256": "50d0884ba35044af4a97fa123f648235ece78f06ed631a823056c7a3e1383ef6",
+  "catalog_sha256": "2f3336fe83a581572d6f2894b1bfee55cd7e0d9a8a4c3089ab5cd75f4b41bd98",
   "command_names": 502,
   "command_pages_parsed": 502,
   "families": {
@@ -57,7 +57,7 @@
     },
     "statistics": {
       "command_names": 81,
-      "overloads": 181
+      "overloads": 182
     },
     "text": {
       "command_names": 27,
@@ -72,9 +72,9 @@
       "overloads": 52
     }
   },
-  "generation_timestamp": "2026-11-11T11:11:32.420673+00:00",
+  "generation_timestamp": "2026-11-12T11:29:37.929093+00:00",
   "generator_version": "1.4.0",
-  "overloads": 1054,
+  "overloads": 1055,
   "runtime_eligibility": {
     "blocked": {
       "command_names": 68,
@@ -82,7 +82,7 @@
     },
     "eligible": {
       "command_names": 434,
-      "overloads": 935
+      "overloads": 936
     }
   },
   "schema_version": "1.4",
@@ -93,13 +93,13 @@
     },
     "experimental": {
       "command_names": 434,
-      "overloads": 931
+      "overloads": 932
     },
     "supported": {
       "command_names": 4,
       "overloads": 4
     }
   },
-  "upstream_commit": "bda0e2c3df988ae512418b55062e26f35bd2b7c4",
+  "upstream_commit": "9a3763487009e985adb4d249d3f75d6939ba6de0",
   "upstream_repository": "https://github.com/geogebra/manual"
 }
